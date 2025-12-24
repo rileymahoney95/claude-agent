@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "financial-briefing": {
+      "type": "stdio",
+      "command": "/Users/rileymahoney/claude-agent/automations/mcp-servers/financial-briefing/venv/bin/python",
+      "args": ["/Users/rileymahoney/claude-agent/automations/mcp-servers/financial-briefing/server.py"]
+    }
+  }
+}

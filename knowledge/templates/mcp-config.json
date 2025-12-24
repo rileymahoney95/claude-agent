@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "example-python": {
+      "type": "stdio",
+      "command": "/path/to/venv/bin/python",
+      "args": ["/path/to/server.py"]
+    },
+    "example-npx": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@some/mcp-package", "--option", "value"]
+    },
+    "example-with-env": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["server.py"],
+      "env": {
+        "API_KEY": "${MY_API_KEY}",
+        "DEBUG": "${DEBUG:-false}"
+      }
+    }
+  }
+}
