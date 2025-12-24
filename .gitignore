@@ -1,0 +1,18 @@
+# Runtime data
+# Runtime data
+.data/
+*.log
+
+# Environment and secrets
+.env
+.env.local
+*.key
+*.pem
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep structure but ignore contents
+.data/**
+!.data/.gitkeep

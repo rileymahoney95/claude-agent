@@ -1,0 +1,49 @@
+{
+  "cryptocurrencies": [
+    {
+      "id": "bitcoin",
+      "symbol": "BTC",
+      "name": "Bitcoin",
+      "holdings": {
+        "quantity": 0.1,
+        "cost_basis": 50000.00
+      }
+    },
+    {
+      "id": "ethereum",
+      "symbol": "ETH",
+      "name": "Ethereum"
+    }
+  ],
+  "stocks": {
+    "index_funds": [
+      {
+        "ticker": "VOO",
+        "name": "Vanguard S&P 500 ETF",
+        "holdings": {
+          "quantity": 5,
+          "cost_basis": 400.00
+        }
+      }
+    ],
+    "etfs": [
+      {"ticker": "IBIT", "name": "iShares Bitcoin Trust ETF"},
+      {"ticker": "ETHA", "name": "iShares Ethereum Trust ETF"}
+    ],
+    "individual": [
+      {
+        "ticker": "AAPL",
+        "name": "Apple Inc.",
+        "holdings": {
+          "quantity": 10,
+          "cost_basis": 150.00
+        }
+      },
+      {"ticker": "GOOGL", "name": "Alphabet Inc."},
+      {"ticker": "NVDA", "name": "NVIDIA Corporation"},
+      {"ticker": "BRK-B", "name": "Berkshire Hathaway Class B"},
+      {"ticker": "AMZN", "name": "Amazon.com Inc."},
+      {"ticker": "TSLA", "name": "Tesla Inc."}
+    ]
+  }
+}

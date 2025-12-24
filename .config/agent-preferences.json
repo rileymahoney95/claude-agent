@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "preferences": {
+    "autoLog": true,
+    "logLevel": "info",
+    "contextRetention": "7days"
+  }
+}
