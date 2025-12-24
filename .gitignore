@@ -16,3 +16,5 @@ Thumbs.db
 # Keep structure but ignore contents
 .data/**
 !.data/.gitkeep
+
+.docs/**

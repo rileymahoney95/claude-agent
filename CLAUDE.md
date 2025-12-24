@@ -32,6 +32,8 @@ This is a personal automation assistant repository for managing daily tasks and 
 - `daily/` - Daily recurring tasks (each script in its own subdirectory)
   - `markets/` - Financial market tracker (Python)
   - `wherewasi/` - Project context restorer (Node.js)
+- `tools/` - General-purpose tools
+  - `todos/` - Personal task manager (Python)
 - `integrations/` - Third-party service integrations
 - `workflows/` - Multi-step automation workflows
 
@@ -78,6 +80,51 @@ Context restorer CLI that scans all git repos in `~/Documents/Projects` and show
 - `--json` - Output as JSON
 - `--path <dir>` - Override default projects path
 
+### TODOs (`automations/tools/todos/`)
+Personal task manager with CLI and MCP server interfaces.
+
+**Usage:** `todos` (after setting up alias, see [Script Organization](#script-organization))
+
+**Features:**
+- Add, complete, edit, and delete tasks
+- Categories, priorities (low/medium/high), and due dates
+- Fuzzy matching for completing tasks by partial text
+- Natural language due dates ("tomorrow", "next friday", "in 3 days")
+- File locking for safe concurrent access
+- JSON output mode for MCP integration
+
+**CLI Commands:**
+```bash
+todos                              # List pending tasks
+todos list --all                   # Include completed tasks
+todos list --category work         # Filter by category
+todos list --priority high         # Filter by priority
+todos list --due today             # Due today or overdue
+
+todos add "Task description"       # Add a task
+todos add "Task" -c work -p high   # With category and priority
+todos add "Task" -d tomorrow       # With due date
+
+todos done a1b2                    # Complete by ID
+todos done groceries               # Complete by text match
+
+todos edit a1b2 --text "New text"  # Edit task
+todos edit a1b2 --due "next week"  # Change due date
+
+todos remove a1b2                  # Delete task (with confirmation)
+todos rm a1b2 --force              # Delete without confirmation
+
+todos categories                   # List categories
+todos categories add finance       # Add category
+todos categories remove old        # Remove category
+```
+
+**Data Files:**
+- `.data/todos.json` - Task persistence
+- `.config/todos-config.json` - User preferences
+
+**MCP Server:** Available via the `todos` MCP server with tools: `get_todos`, `add_todo`, `complete_todo`, `update_todo`, `delete_todo`, `get_categories`, `add_category`, `delete_category`
+
 **`scripts/` - Utility Scripts**
 - `setup/` - Initial setup and installation scripts
 - `maintenance/` - Cleanup and maintenance utilities
@@ -108,6 +155,7 @@ automations/daily/
 ```bash
 alias markets="~/claude-agent/automations/daily/markets.sh"
 alias wherewasi="~/claude-agent/automations/daily/wherewasi.sh"
+alias todos="~/claude-agent/automations/tools/todos.sh"
 ```
 
 After adding aliases, reload your shell: `source ~/.zshrc`
