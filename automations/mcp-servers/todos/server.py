@@ -258,6 +258,71 @@ async def delete_category(name: str) -> dict:
     return call_cli("categories", "remove", name)
 
 
+@mcp.tool()
+async def remind_tasks(
+    dry_run: bool = False,
+    overdue_only: bool = False,
+    imessage: bool = False
+) -> dict:
+    """
+    Check for overdue and due-today tasks, send notifications.
+
+    Args:
+        dry_run: Show what would be sent without actually sending
+        overdue_only: Only check overdue tasks (skip due-today)
+        imessage: Send via iMessage instead of macOS notification
+
+    Returns:
+        Dictionary with:
+        - success: True/False
+        - overdue_count: Number of overdue tasks
+        - due_today_count: Number of tasks due today
+        - notifications_sent: Count of notifications sent
+        - error: Error message (if failed)
+    """
+    args = ["remind"]
+
+    if dry_run:
+        args.append("--dry-run")
+    if overdue_only:
+        args.append("--overdue-only")
+    if imessage:
+        args.append("--imessage")
+
+    return call_cli(*args)
+
+
+@mcp.tool()
+async def archive_todos(
+    before: str = None,
+    archive_all: bool = False
+) -> dict:
+    """
+    Archive old completed tasks to keep the main file lean.
+
+    Args:
+        before: Archive tasks completed before this date (ISO format or natural language)
+        archive_all: Archive ALL completed tasks regardless of date
+
+    Default behavior (no args): Archive completed tasks older than 30 days.
+
+    Returns:
+        Dictionary with:
+        - success: True/False
+        - archived_count: Number of tasks archived
+        - tasks: List of archived task objects
+        - error: Error message (if failed)
+    """
+    args = ["archive"]
+
+    if before:
+        args.extend(["--before", before])
+    if archive_all:
+        args.append("--all")
+
+    return call_cli(*args)
+
+
 # =============================================================================
 # Main
 # =============================================================================

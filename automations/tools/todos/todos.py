@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -34,8 +35,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 DATA_DIR = REPO_ROOT / ".data"
 CONFIG_DIR = REPO_ROOT / ".config"
 TODOS_FILE = DATA_DIR / "todos.json"
+ARCHIVE_FILE = DATA_DIR / "todos-archive.json"
 CONFIG_FILE = CONFIG_DIR / "todos-config.json"
 LOCK_FILE = DATA_DIR / "todos.json.lock"
+ARCHIVE_LOCK_FILE = DATA_DIR / "todos-archive.json.lock"
 
 # Validation constants
 MAX_TEXT_LENGTH = 500
@@ -110,6 +113,37 @@ def save_todos(data: dict) -> None:
             fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
+def load_archive() -> dict:
+    """Load archive from JSON file. Creates default structure if missing."""
+    ensure_data_dir()
+    if not ARCHIVE_FILE.exists():
+        return {"tasks": []}
+    try:
+        return json.loads(ARCHIVE_FILE.read_text())
+    except json.JSONDecodeError:
+        return {"tasks": []}
+
+
+def save_archive(data: dict) -> None:
+    """Save archive to JSON file with file locking and atomic write."""
+    ensure_data_dir()
+    ARCHIVE_LOCK_FILE.touch()
+
+    with open(ARCHIVE_LOCK_FILE, "w") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            # Backup before write
+            if ARCHIVE_FILE.exists():
+                shutil.copy(ARCHIVE_FILE, ARCHIVE_FILE.with_suffix(".json.bak"))
+
+            # Write atomically
+            temp_file = ARCHIVE_FILE.with_suffix(".json.tmp")
+            temp_file.write_text(json.dumps(data, indent=2))
+            temp_file.rename(ARCHIVE_FILE)
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 def load_config() -> dict:
     """Load config from JSON file. Creates default if missing."""
     ensure_config_dir()
@@ -117,7 +151,8 @@ def load_config() -> dict:
         default_config = {
             "default_priority": "medium",
             "default_category": None,
-            "show_completed_days": 7
+            "show_completed_days": 7,
+            "recipient_phone_number": None
         }
         CONFIG_FILE.write_text(json.dumps(default_config, indent=2))
         return default_config
@@ -127,7 +162,8 @@ def load_config() -> dict:
         return {
             "default_priority": "medium",
             "default_category": None,
-            "show_completed_days": 7
+            "show_completed_days": 7,
+            "recipient_phone_number": None
         }
 
 
@@ -224,6 +260,48 @@ def is_overdue(iso_date: str | None) -> bool:
         return False
 
 
+def send_notification(title: str, message: str, subtitle: str = "") -> bool:
+    """Send a macOS notification via osascript."""
+    # Escape double quotes in strings
+    title = title.replace('"', '\\"')
+    message = message.replace('"', '\\"')
+    subtitle = subtitle.replace('"', '\\"')
+
+    script = f'display notification "{message}" with title "{title}"'
+    if subtitle:
+        script = f'display notification "{message}" with title "{title}" subtitle "{subtitle}"'
+
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        text=True
+    )
+    return result.returncode == 0
+
+
+def send_imessage(recipient: str, message: str) -> bool:
+    """Send iMessage via AppleScript."""
+    # Escape for AppleScript
+    escaped_message = message.replace('\\', '\\\\').replace('"', '\\"')
+    escaped_recipient = recipient.replace('\\', '\\\\').replace('"', '\\"')
+
+    applescript = f'''
+    tell application "Messages"
+        set targetService to 1st service whose service type = iMessage
+        set targetBuddy to buddy "{escaped_recipient}" of targetService
+        send "{escaped_message}" to targetBuddy
+    end tell
+    '''
+
+    result = subprocess.run(
+        ['osascript', '-e', applescript],
+        capture_output=True,
+        text=True,
+        timeout=10
+    )
+    return result.returncode == 0
+
+
 # =============================================================================
 # Validation
 # =============================================================================
@@ -309,6 +387,26 @@ def add_task(text: str, category: str = None, priority: str = None, due: str = N
     save_todos(data)
 
     return {"success": True, "task": task}
+
+
+def get_archived_tasks(category: str = None, limit: int = None) -> list[dict]:
+    """Get archived tasks with optional filters."""
+    archive = load_archive()
+    tasks = archive.get("tasks", [])
+
+    # Filter by category
+    if category:
+        category = category.lower()
+        tasks = [t for t in tasks if t.get("category") == category]
+
+    # Sort by archived_at (most recent first)
+    tasks.sort(key=lambda t: t.get("archived_at", ""), reverse=True)
+
+    # Limit results
+    if limit:
+        tasks = tasks[:limit]
+
+    return tasks
 
 
 def get_tasks(status: str = None, category: str = None, priority: str = None,
@@ -533,6 +631,222 @@ def remove_category(name: str) -> dict:
 
 
 # =============================================================================
+# Archive
+# =============================================================================
+
+def archive_tasks(before_date: str = None, archive_all: bool = False) -> dict:
+    """
+    Move completed tasks to archive file.
+
+    Args:
+        before_date: Archive tasks completed before this date (ISO format or natural language)
+        archive_all: If True, archive ALL completed tasks
+
+    Default: Archive completed tasks older than 30 days
+
+    Returns: {"success": bool, "archived_count": int, "tasks": [...]}
+    """
+    data = load_todos()
+    archive = load_archive()
+
+    # Determine cutoff date
+    if archive_all:
+        cutoff = None  # No cutoff - archive all completed
+    elif before_date:
+        parsed = parse_due_date(before_date)
+        if parsed is None:
+            return {"success": False, "error": f"Invalid date: {before_date}"}
+        cutoff = datetime.fromisoformat(parsed)
+    else:
+        # Default: 30 days ago
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+
+    # Find tasks to archive
+    to_archive = []
+    remaining = []
+
+    for task in data["tasks"]:
+        if task["status"] != "completed":
+            remaining.append(task)
+            continue
+
+        # Check if task should be archived
+        should_archive = False
+        if archive_all:
+            should_archive = True
+        elif task.get("completed"):
+            try:
+                completed_dt = datetime.fromisoformat(task["completed"].rstrip("Z"))
+                # Make timezone-aware if needed
+                if completed_dt.tzinfo is None:
+                    completed_dt = completed_dt.replace(tzinfo=timezone.utc)
+                if cutoff.tzinfo is None:
+                    cutoff = cutoff.replace(tzinfo=timezone.utc)
+                should_archive = completed_dt < cutoff
+            except (ValueError, TypeError):
+                # If we can't parse the date, don't archive
+                pass
+
+        if should_archive:
+            # Add archived_at timestamp
+            task["archived_at"] = datetime.now(timezone.utc).isoformat() + "Z"
+            to_archive.append(task)
+        else:
+            remaining.append(task)
+
+    if not to_archive:
+        return {"success": True, "archived_count": 0, "tasks": []}
+
+    # Update both files atomically (lock both)
+    archive["tasks"].extend(to_archive)
+    data["tasks"] = remaining
+
+    save_todos(data)
+    save_archive(archive)
+
+    return {"success": True, "archived_count": len(to_archive), "tasks": to_archive}
+
+
+# =============================================================================
+# Reminders
+# =============================================================================
+
+def cmd_remind(overdue_only: bool = False, dry_run: bool = False,
+               use_json: bool = False, imessage: bool = False) -> dict:
+    """Check for overdue/due-soon tasks and send notifications."""
+    data = load_todos()
+    config = load_config()
+    tasks = [t for t in data["tasks"] if t["status"] == "pending"]
+    today = datetime.now().date()
+
+    overdue = []
+    due_today = []
+
+    for task in tasks:
+        if not task.get("due"):
+            continue
+        due_date = datetime.fromisoformat(task["due"]).date()
+        if due_date < today:
+            overdue.append(task)
+        elif due_date == today and not overdue_only:
+            due_today.append(task)
+
+    notifications_sent = 0
+
+    # iMessage mode: send single combined message
+    if imessage:
+        recipient = config.get("recipient_phone_number")
+        if not recipient:
+            error_msg = "recipient_phone_number not configured in .config/todos-config.json"
+            if use_json:
+                print(json.dumps({"success": False, "error": error_msg}))
+            else:
+                print_error(error_msg)
+            return {"success": False, "error": error_msg}
+
+        if not overdue and not due_today:
+            if use_json:
+                print(json.dumps({"success": True, "overdue_count": 0,
+                                  "due_today_count": 0, "notifications_sent": 0}))
+            else:
+                print(f"{Fore.GREEN}No tasks due.{Style.RESET_ALL}")
+            return {"success": True, "overdue_count": 0,
+                    "due_today_count": 0, "notifications_sent": 0}
+
+        # Format iMessage
+        lines = ["📋 Task Reminders"]
+        if overdue:
+            lines.append(f"\n⚠️ OVERDUE ({len(overdue)}):")
+            for t in overdue[:5]:  # Limit to 5
+                lines.append(f"• {t['text'][:40]}")
+            if len(overdue) > 5:
+                lines.append(f"  ...and {len(overdue) - 5} more")
+        if due_today:
+            lines.append(f"\n📅 DUE TODAY ({len(due_today)}):")
+            for t in due_today[:5]:
+                lines.append(f"• {t['text'][:40]}")
+            if len(due_today) > 5:
+                lines.append(f"  ...and {len(due_today) - 5} more")
+
+        message = "\n".join(lines)
+
+        if dry_run:
+            print(f"Would send iMessage to {recipient}:\n{message}")
+        else:
+            if send_imessage(recipient, message):
+                notifications_sent = 1
+                if not use_json:
+                    print(f"{Fore.GREEN}iMessage sent to {recipient}{Style.RESET_ALL}")
+            else:
+                if not use_json:
+                    print_error("Failed to send iMessage")
+
+        result = {
+            "success": notifications_sent > 0 or dry_run,
+            "overdue_count": len(overdue),
+            "due_today_count": len(due_today),
+            "notifications_sent": notifications_sent,
+            "dry_run": dry_run,
+            "imessage": True
+        }
+        if use_json:
+            print(json.dumps(result))
+        return result
+
+    # macOS notification mode (default)
+    if overdue:
+        count = len(overdue)
+        title = "Overdue Tasks"
+        if count == 1:
+            message = overdue[0]["text"][:50]
+        else:
+            message = f"{count} tasks overdue"
+
+        if dry_run:
+            print(f"Would notify: {title} - {message}")
+        else:
+            if send_notification(title, message):
+                notifications_sent += 1
+
+    if due_today:
+        count = len(due_today)
+        title = "Due Today"
+        if count == 1:
+            message = due_today[0]["text"][:50]
+        else:
+            message = f"{count} tasks due today"
+
+        if dry_run:
+            print(f"Would notify: {title} - {message}")
+        else:
+            if send_notification(title, message):
+                notifications_sent += 1
+
+    result = {
+        "success": True,
+        "overdue_count": len(overdue),
+        "due_today_count": len(due_today),
+        "notifications_sent": notifications_sent,
+        "dry_run": dry_run
+    }
+
+    if use_json:
+        print(json.dumps(result))
+    elif not dry_run:
+        total = len(overdue) + len(due_today)
+        if total == 0:
+            print(f"{Fore.GREEN}No tasks due.{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.GREEN}Sent {notifications_sent} notification(s).{Style.RESET_ALL}")
+            if overdue:
+                print(f"  - {len(overdue)} overdue")
+            if due_today:
+                print(f"  - {len(due_today)} due today")
+
+    return result
+
+
+# =============================================================================
 # Output Formatting
 # =============================================================================
 
@@ -696,6 +1010,49 @@ def print_categories(categories: list[str], use_json: bool = False):
     print()
 
 
+def print_archived_list(tasks: list[dict], use_json: bool = False):
+    """Print formatted archived task list."""
+    if use_json:
+        print(json.dumps({
+            "success": True,
+            "tasks": tasks,
+            "count": len(tasks)
+        }))
+        return
+
+    if not tasks:
+        print(f"\n{Fore.YELLOW}No archived tasks.{Style.RESET_ALL}\n")
+        return
+
+    print(f"\nArchived Tasks ({len(tasks)})")
+    print("-" * 60)
+
+    for task in tasks:
+        parts = []
+        parts.append(f"{Fore.MAGENTA}[archived]{Style.RESET_ALL}")
+        parts.append(f"{Fore.CYAN}[{task['id']}]{Style.RESET_ALL}")
+
+        text = task["text"]
+        if len(text) > 40:
+            text = text[:37] + "..."
+        parts.append(f"{text:<40}")
+
+        if task.get("category"):
+            parts.append(f"{Fore.YELLOW}{task['category']:<12}{Style.RESET_ALL}")
+
+        if task.get("archived_at"):
+            try:
+                archived_dt = datetime.fromisoformat(task["archived_at"].rstrip("Z"))
+                archived_str = archived_dt.strftime("%b %d").replace(" 0", " ")
+                parts.append(f"{Fore.WHITE}archived {archived_str}{Style.RESET_ALL}")
+            except ValueError:
+                pass
+
+        print("  " + " ".join(parts))
+
+    print()
+
+
 # =============================================================================
 # CLI
 # =============================================================================
@@ -748,6 +1105,27 @@ def main():
     cat_add.add_argument("name", help="Category name")
     cat_remove = cat_subparsers.add_parser("remove", help="Remove a category")
     cat_remove.add_argument("name", help="Category name")
+
+    # Remind command
+    remind_parser = subparsers.add_parser("remind", help="Check and notify for due tasks")
+    remind_parser.add_argument("--dry-run", action="store_true",
+                               help="Show what would be notified without sending")
+    remind_parser.add_argument("--overdue-only", action="store_true",
+                               help="Only notify for overdue tasks")
+    remind_parser.add_argument("--imessage", action="store_true",
+                               help="Send reminder via iMessage instead of macOS notification")
+
+    # Archive command
+    archive_parser = subparsers.add_parser("archive", help="Archive old completed tasks")
+    archive_parser.add_argument("--before", help="Archive tasks completed before this date")
+    archive_parser.add_argument("--all", "-a", action="store_true",
+                                dest="archive_all", help="Archive all completed tasks")
+
+    # Archived command (view archived tasks)
+    archived_parser = subparsers.add_parser("archived", help="View archived tasks")
+    archived_parser.add_argument("--category", "-c", help="Filter by category")
+    archived_parser.add_argument("--limit", "-n", type=int, default=20,
+                                 help="Max number of tasks to show (default: 20)")
 
     args = parser.parse_args()
     use_json = args.json
@@ -874,6 +1252,39 @@ def main():
                 # List categories
                 categories = get_categories()
                 print_categories(categories, use_json=use_json)
+
+        elif args.command == "remind":
+            cmd_remind(
+                overdue_only=args.overdue_only,
+                dry_run=args.dry_run,
+                use_json=use_json,
+                imessage=args.imessage
+            )
+
+        elif args.command == "archive":
+            result = archive_tasks(
+                before_date=args.before,
+                archive_all=args.archive_all
+            )
+            if result["success"]:
+                if use_json:
+                    print(json.dumps(result))
+                else:
+                    count = result["archived_count"]
+                    if count == 0:
+                        print(f"\n{Fore.YELLOW}No tasks to archive.{Style.RESET_ALL}\n")
+                    else:
+                        print(f"\n{Fore.GREEN}Archived {count} task(s).{Style.RESET_ALL}\n")
+            else:
+                print_error(result["error"], use_json=use_json)
+                sys.exit(1)
+
+        elif args.command == "archived":
+            tasks = get_archived_tasks(
+                category=args.category,
+                limit=args.limit
+            )
+            print_archived_list(tasks, use_json=use_json)
 
     except KeyboardInterrupt:
         print("\nCancelled.")

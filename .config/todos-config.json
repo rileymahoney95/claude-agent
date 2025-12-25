@@ -1,5 +1,6 @@
 {
   "default_priority": "medium",
   "default_category": null,
-  "show_completed_days": 7
+  "show_completed_days": 7,
+  "recipient_phone_number": "+19545402321"
 }
