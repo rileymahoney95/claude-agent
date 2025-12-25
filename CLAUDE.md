@@ -117,13 +117,18 @@ todos rm a1b2 --force              # Delete without confirmation
 todos categories                   # List categories
 todos categories add finance       # Add category
 todos categories remove old        # Remove category
+
+todos archive                      # Archive completed > 30 days old
+todos archive --before "2025-01-01" # Archive completed before date
+todos archive --all                # Archive ALL completed tasks
 ```
 
 **Data Files:**
 - `.data/todos.json` - Task persistence
+- `.data/todos-archive.json` - Archived completed tasks
 - `.config/todos-config.json` - User preferences
 
-**MCP Server:** Available via the `todos` MCP server with tools: `get_todos`, `add_todo`, `complete_todo`, `update_todo`, `delete_todo`, `get_categories`, `add_category`, `delete_category`
+**MCP Server:** Available via the `todos` MCP server with tools: `get_todos`, `add_todo`, `complete_todo`, `update_todo`, `delete_todo`, `get_categories`, `add_category`, `delete_category`, `archive_todos`
 
 **`scripts/` - Utility Scripts**
 - `setup/` - Initial setup and installation scripts

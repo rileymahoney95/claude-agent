@@ -1,14 +1,11 @@
 {
   "mcpServers": {
-    "financial-briefing": {
-      "type": "stdio",
-      "command": "/Users/rileymahoney/claude-agent/automations/mcp-servers/financial-briefing/venv/bin/python",
-      "args": ["/Users/rileymahoney/claude-agent/automations/mcp-servers/financial-briefing/server.py"]
-    },
     "todos": {
       "type": "stdio",
       "command": "/Users/rileymahoney/claude-agent/automations/mcp-servers/todos/venv/bin/python",
-      "args": ["/Users/rileymahoney/claude-agent/automations/mcp-servers/todos/server.py"]
+      "args": [
+        "/Users/rileymahoney/claude-agent/automations/mcp-servers/todos/server.py"
+      ]
     }
   }
 }
