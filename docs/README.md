@@ -1,18 +1,23 @@
-# Knowledge Base
+# Development Documentation
 
-Documentation and templates for building automation scripts and integrations.
+Guides and templates for building automation scripts and integrations.
 
 ## Directory Structure
 
 ```
-knowledge/
+docs/
 ├── guides/                    # How-to documentation
 │   ├── cli-design-patterns.md     # Best practices for CLI tools
 │   ├── markets.md                 # Markets automation guide
+│   ├── mcp-server-typescript.md   # TypeScript MCP server guide
+│   ├── music-theory-programming.md # Music theory for MIDI generation
 │   └── mcp/                       # MCP-specific guides
 │       ├── setup.md                   # MCP server configuration
 │       └── subprocess-pattern.md      # Subprocess-based MCP architecture
 └── templates/                 # Reusable code templates
+    ├── fastmcp-server.py          # Python FastMCP template
+    ├── mcp-config.json            # MCP config template
+    ├── mcp-tool-handler.ts        # TypeScript tool handler
     └── python/                    # Python templates
         ├── cli-with-json.md           # CLI with JSON output mode
         └── mcp-subprocess-server.md   # MCP server using subprocess
@@ -97,9 +102,9 @@ Templates provide starting points for new code. Use when you need to:
 - Follow established patterns
 - Save setup time
 
-## Contributing Knowledge
+## Contributing
 
-When adding to the knowledge base:
+When adding to docs:
 
 1. **Guides** should be:
    - Based on actual working implementations

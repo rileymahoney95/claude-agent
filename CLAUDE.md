@@ -34,6 +34,9 @@ This is a personal automation assistant repository for managing daily tasks and 
   - `wherewasi/` - Project context restorer (Node.js)
 - `tools/` - General-purpose tools
   - `todos/` - Personal task manager (Python)
+- `mcp-servers/` - MCP server implementations
+  - `todos/` - Task manager MCP server (Python)
+  - `midi/` - MIDI file generator (TypeScript)
 - `integrations/` - Third-party service integrations
 - `workflows/` - Multi-step automation workflows
 
@@ -130,12 +133,40 @@ todos archive --all                # Archive ALL completed tasks
 
 **MCP Server:** Available via the `todos` MCP server with tools: `get_todos`, `add_todo`, `complete_todo`, `update_todo`, `delete_todo`, `get_categories`, `add_category`, `delete_category`, `archive_todos`
 
+### MIDI Generator (`automations/mcp-servers/midi/`)
+MCP server for generating MIDI files with music theory utilities.
+
+**MCP Tools:**
+- `generate_midi` - Creates .mid files from note data (pitch, time, duration, velocity). Accepts note names (C4, D#5) or MIDI numbers. Returns embedded file for download.
+- `generate_pattern` - High-level pattern generator. Creates chord progressions, arpeggios, basslines, and drum patterns from simple parameters.
+- `get_scale` - Get notes for any scale (major, minor, modes, pentatonic, blues, etc.). Returns note names and MIDI numbers.
+- `get_chord` - Get notes for any chord (major, minor, 7ths, sus, dim, aug, etc.). Supports inversions.
+- `get_key_info` - Get key signature info (sharps/flats, scale notes, relative key).
+
+**Pattern Types (for generate_pattern):**
+- `chord_progression` - Roman numeral progressions (I-IV-V-I, ii-V-I, I-V-vi-IV, etc.)
+- `arpeggio` - Styles: up, down, up_down, broken (Alberti bass)
+- `bassline` - Styles: root, root_fifth, walking
+- `drums` - Styles: rock, jazz, electronic
+
+**Scale Types:** major, natural_minor, harmonic_minor, melodic_minor, pentatonic_major, pentatonic_minor, blues, dorian, phrygian, lydian, mixolydian, locrian, whole_tone, chromatic
+
+**Chord Types:** major, minor, diminished, augmented, sus2, sus4, major7, minor7, dominant7, diminished7, half_diminished7, augmented7, major9, minor9, dominant9, add9, add11, 6, minor6
+
+**Output:** Files saved to `automations/mcp-servers/midi/output/`
+
+**Build:** `npm run build` in the midi directory
+
 **`scripts/` - Utility Scripts**
 - `setup/` - Initial setup and installation scripts
 - `maintenance/` - Cleanup and maintenance utilities
 
-**`knowledge/` - Documentation**
-- Templates, guides, and reference documentation
+**`docs/` - Development Documentation**
+- `guides/` - How-to documentation (e.g., building MCP servers)
+- `templates/` - Reusable code and config templates
+
+**`personal/` - Personal Life Content**
+- `finance/` - Financial planning prompts and resources
 
 ## Key Patterns
 
