@@ -13,6 +13,13 @@
       "args": [
         "/Users/rileymahoney/claude-agent/automations/mcp-servers/midi/dist/index.js"
       ]
+    },
+    "finance": {
+      "type": "stdio",
+      "command": "/Users/rileymahoney/claude-agent/automations/mcp-servers/finance/venv/bin/python",
+      "args": [
+        "/Users/rileymahoney/claude-agent/automations/mcp-servers/finance/server.py"
+      ]
     }
   }
 }
