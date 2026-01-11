@@ -6,6 +6,13 @@
       "args": [
         "/Users/rileymahoney/claude-agent/automations/mcp-servers/todos/server.py"
       ]
+    },
+    "midi": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/Users/rileymahoney/claude-agent/automations/mcp-servers/midi/dist/index.js"
+      ]
     }
   }
 }
