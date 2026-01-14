@@ -38,13 +38,26 @@ This is a personal automation assistant repository for managing daily tasks and 
   - `wherewasi/` - Project context restorer (Node.js)
 - `tools/` - General-purpose tools
   - `todos/` - Personal task manager (Python)
-  - `finance/` - Brokerage statement parser and financial planning (Python)
 - `mcp-servers/` - MCP server implementations
   - `todos/` - Task manager MCP server (Python)
   - `midi/` - MIDI file generator (TypeScript)
-  - `finance/` - Financial statement parser MCP server (Python)
 - `integrations/` - Third-party service integrations
 - `workflows/` - Multi-step automation workflows
+
+**`finance/` - Financial Planning & Portfolio Tools**
+
+- `cli/` - Finance CLI tool (Python)
+  - `finance.py` - Main CLI for statement parsing and planning
+  - `parsers/` - Brokerage statement parsers (SoFi/Apex)
+  - `aggregator.py` - Unified portfolio view across accounts
+  - `analyzer.py` - Goal/allocation analysis + market context
+  - `advisor.py` - Recommendation engine with priority logic
+- `api/` - FastAPI REST server for web UI
+- `mcp/` - Finance MCP server
+- `templates/` - Planning prompt templates
+- `finance.sh` - CLI wrapper script
+- `finance-api.sh` - API server wrapper script
+- `venv/` - Shared virtual environment
 
 ## Available Automations
 
@@ -52,7 +65,7 @@ This is a personal automation assistant repository for managing daily tasks and 
 
 Displays price data for tracked cryptocurrencies and stocks with multiple timeframes.
 
-**Usage:** `markets` (after setting up alias, see [Script Organization](#script-organization))
+**Usage:** `markets` (requires PATH setup, see [Script Organization](#script-organization))
 
 **Features:**
 
@@ -78,7 +91,7 @@ Displays price data for tracked cryptocurrencies and stocks with multiple timefr
 
 Context restorer CLI that scans all git repos in `~/Documents/Projects` and shows where you left off.
 
-**Usage:** `wherewasi` (after setting up alias, see [Script Organization](#script-organization))
+**Usage:** `wherewasi` (requires PATH setup, see [Script Organization](#script-organization))
 
 **Features:**
 
@@ -100,7 +113,7 @@ Context restorer CLI that scans all git repos in `~/Documents/Projects` and show
 
 Personal task manager with CLI and MCP server interfaces.
 
-**Usage:** `todos` (after setting up alias, see [Script Organization](#script-organization))
+**Usage:** `todos` (requires PATH setup, see [Script Organization](#script-organization))
 
 **Features:**
 
@@ -150,23 +163,35 @@ todos archive --all                # Archive ALL completed tasks
 
 **MCP Server:** Available via the `todos` MCP server with tools: `get_todos`, `add_todo`, `complete_todo`, `update_todo`, `delete_todo`, `get_categories`, `add_category`, `delete_category`, `archive_todos`
 
-### Finance (`automations/tools/finance/`)
+### Finance (`finance/`)
 
-Parses brokerage statements (PDFs) and auto-updates the financial planning template. Stores historical snapshots for tracking portfolio over time.
+Parses brokerage statements (PDFs) and auto-updates the financial planning template. Stores historical snapshots for tracking portfolio over time. Manages manual holdings (crypto, bank accounts) with live price fetching. Generate populated planning prompts for Claude sessions.
 
-**Usage:** `finance` (after setting up alias, see [Script Organization](#script-organization))
+**Usage:** `finance` (requires PATH setup, see [Script Organization](#script-organization))
 
 **Features:**
 
-- Parses SoFi/Apex Clearing brokerage statements
+- Pull all statements from Downloads with one command (batch processing)
+- Parses SoFi/Apex Clearing brokerage statements (Roth IRA, Brokerage, Traditional IRA)
 - Extracts holdings, income, and retirement account info
 - Saves historical snapshots to `.data/finance/snapshots/`
-- Auto-updates `personal/finance/FINANCIAL_PLANNING_PROMPT.md` with current values
+- Auto-updates `finance/templates/FINANCIAL_PLANNING_PROMPT.md` with current values
 - Aggregates positions across account types (Cash + On-loan)
+- Manual holdings management (crypto, bank accounts, HSA) with live CoinGecko prices
+- Unified portfolio view across all accounts with category breakdown (retirement, equities, crypto, cash)
+- Goal progress analysis with on-track status and monthly requirements
+- Allocation analysis comparing current vs recommended targets with drift detection
+- Market context with BTC/ETH/S&P 500 data and opportunity detection
+- **Financial advisor** with prioritized recommendations (rebalancing, surplus allocation, opportunities)
+- Generate populated planning prompts for financial planning sessions
 
 **CLI Commands:**
 
 ```bash
+finance pull                        # Pull ALL statements from Downloads (default)
+finance pull --latest               # Only pull the most recent statement
+finance pull --no-update            # Pull without updating template
+
 finance parse <statement.pdf>       # Parse statement, save snapshot, update template
 finance parse <file> --no-update    # Parse without updating template
 finance parse <file> --json         # Output as JSON
@@ -176,22 +201,65 @@ finance history --account roth_ira  # Filter by account type
 
 finance summary                     # Show current portfolio from latest snapshot
 finance summary --json              # Output as JSON
+
+finance portfolio                   # Unified view across all accounts (snapshots + holdings)
+finance portfolio --no-prices       # Skip live crypto price fetch
+finance portfolio --json            # Output as JSON
+
+finance holdings                    # Display all holdings with live crypto prices
+finance holdings --json             # Output as JSON
+finance holdings set crypto.BTC 0.5 # Set crypto quantity
+finance holdings set crypto.ETH 2.0 --notes "Coinbase"
+finance holdings set bank.hysa 12000  # Set bank balance
+finance holdings set other.hsa 2000   # Set other account balance
+finance holdings check              # Check if holdings data is stale (> 7 days)
+
+finance profile                     # View financial profile
+finance profile --edit              # Interactively edit profile
+finance profile --json              # Output as JSON
+
+finance plan                        # Save to PLANNING_SESSION.md + copy to clipboard
+finance plan --no-save              # Only copy to clipboard
+finance plan --no-copy              # Only save to file
+finance plan --json                 # Output as JSON with prompt text
+
+finance advise                      # Get prioritized financial recommendations
+finance advise --focus goals        # Focus on goal-related recommendations
+finance advise --focus rebalance    # Focus on allocation/rebalancing
+finance advise --focus surplus      # Focus on surplus allocation
+finance advise --json               # Output as JSON
+
+finance db start                    # Start PostgreSQL container
+finance db stop                     # Stop PostgreSQL container
+finance db status                   # Check database connection
+finance db migrate                  # Migrate JSON data to database
+finance db export                   # Export database to JSON
 ```
 
 **Workflow:**
 
-1. Download statement PDF from SoFi
-2. Place in `personal/finance/statements/`
-3. Run `finance parse <filename>`
-4. Template is auto-updated with new Roth IRA value
+1. Download statement PDFs from SoFi (all accounts)
+2. Run `finance pull` to process all statements
+3. Statements are moved to `personal/finance/statements/`, parsed, and template updated
+4. Update manual holdings with `finance holdings set` (crypto quantities, bank balances)
+5. Run `finance plan` to save + copy planning prompt for Claude
 
 **Data Files:**
 
 - `.data/finance/snapshots/` - Historical snapshot JSONs (one per statement)
-- `personal/finance/statements/` - Statement PDFs
-- `personal/finance/FINANCIAL_PLANNING_PROMPT.md` - Planning template (auto-updated)
+- `personal/finance/statements/` - Statement PDFs (personal data)
+- `finance/templates/FINANCIAL_PLANNING_PROMPT.md` - Planning template (auto-updated)
+- `finance/templates/PLANNING_SESSION.md` - Generated planning session output
+- `.config/finance-profile.json` - User financial profile
+- `.config/holdings.json` - Manual holdings (crypto, bank accounts, other)
 
-**MCP Server:** Available via the `finance` MCP server with tools: `parse_statement`, `get_finance_history`, `get_finance_summary`
+**Supported Crypto Symbols:** BTC, ETH, SOL, DOGE, ADA, XRP, AVAX, DOT, MATIC, LINK (prices fetched from CoinGecko)
+
+**MCP Server:** Available via the `finance` MCP server with tools: `pull_statement`, `parse_statement`, `get_finance_history`, `get_finance_summary`, `get_portfolio`, `generate_planning_prompt`, `get_holdings`, `set_holding`, `check_holdings_freshness`, `get_financial_advice`
+
+**API Server:** `finance-api` starts FastAPI on port 8000. Use `--db` flag to enable PostgreSQL backend. Endpoints: `/api/v1/portfolio`, `/api/v1/holdings`, `/api/v1/profile`, `/api/v1/advice`, `/api/v1/statements/history`. OpenAPI docs at `/docs`.
+
+**Database:** Optional PostgreSQL backend via Docker. Enable with `finance-api --db` or `export FINANCE_USE_DATABASE=true`. Uses dual-write (DB + JSON) during migration. See `finance/USAGE.md` for details.
 
 ### MIDI Generator (`automations/mcp-servers/midi/`)
 
@@ -232,7 +300,7 @@ MCP server for generating MIDI files with music theory utilities.
 
 **`personal/` - Personal Life Content**
 
-- `finance/` - Financial planning prompts and resources
+- `finance/statements/` - Brokerage statement PDFs (personal data)
 
 ## Key Patterns
 
@@ -242,8 +310,8 @@ Each automation script lives in its own subdirectory with a wrapper script at th
 
 ```
 automations/daily/
-├── markets.sh              # wrapper script (invoke this)
-├── wherewasi.sh            # wrapper script (invoke this)
+├── markets.sh              # wrapper script
+├── wherewasi.sh            # wrapper script
 ├── markets/
 │   ├── markets.py          # actual script
 │   ├── requirements.txt
@@ -254,16 +322,24 @@ automations/daily/
 
 **Wrapper scripts** handle environment setup (venv activation, correct paths) so you can run from anywhere.
 
-**Shell aliases** (add to `~/.zshrc` or `~/.bashrc`):
+**CLI Setup** - Add the `bin/` directory to PATH (add to `~/.zshrc` or `~/.bashrc`):
 
 ```bash
-alias markets="~/claude-agent/automations/daily/markets.sh"
-alias wherewasi="~/claude-agent/automations/daily/wherewasi.sh"
-alias todos="~/claude-agent/automations/tools/todos.sh"
-alias finance="~/claude-agent/automations/tools/finance.sh"
+export PATH="$HOME/Documents/Projects/claude-agent/bin:$PATH"
 ```
 
-After adding aliases, reload your shell: `source ~/.zshrc`
+The `bin/` directory contains symlinks to all CLI tools:
+
+```
+bin/
+├── markets → ../automations/daily/markets.sh
+├── wherewasi → ../automations/daily/wherewasi.sh
+├── todos → ../automations/tools/todos.sh
+├── finance → ../finance/finance.sh
+└── finance-api → ../finance/finance-api.sh
+```
+
+After updating PATH, reload your shell: `source ~/.zshrc`
 
 ### Data Persistence
 

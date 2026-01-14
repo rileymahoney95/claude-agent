@@ -1,0 +1,4 @@
+# Ignore symlink directory to prevent duplicate file indexing
+# Cursor indexes files through symlinks, which creates duplicate references
+# when the symlink points back into the workspace
+links/
