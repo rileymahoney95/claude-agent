@@ -52,6 +52,7 @@ This is a personal automation assistant repository for managing daily tasks and 
   - `aggregator.py` - Unified portfolio view across accounts
   - `analyzer.py` - Goal/allocation analysis + market context
   - `advisor.py` - Recommendation engine with priority logic
+  - `projections.py` - Projection settings, historical data, asset class mapping
 - `api/` - FastAPI REST server for web UI
 - `mcp/` - Finance MCP server
 - `templates/` - Planning prompt templates
@@ -183,6 +184,7 @@ Parses brokerage statements (PDFs) and auto-updates the financial planning templ
 - Allocation analysis comparing current vs recommended targets with drift detection
 - Market context with BTC/ETH/S&P 500 data and opportunity detection
 - **Financial advisor** with prioritized recommendations (rebalancing, surplus allocation, opportunities)
+- **Portfolio projections** with Coast FIRE calculations, scenario management, and historical data
 - Generate populated planning prompts for financial planning sessions
 
 **CLI Commands:**
@@ -229,11 +231,10 @@ finance advise --focus rebalance    # Focus on allocation/rebalancing
 finance advise --focus surplus      # Focus on surplus allocation
 finance advise --json               # Output as JSON
 
-finance db start                    # Start PostgreSQL container
-finance db stop                     # Stop PostgreSQL container
-finance db status                   # Check database connection
-finance db migrate                  # Migrate JSON data to database
+finance db status                   # Check database status
+finance db migrate                  # Migrate JSON data to SQLite
 finance db export                   # Export database to JSON
+finance db reset                    # Reset database (delete SQLite file)
 ```
 
 **Workflow:**
@@ -246,7 +247,8 @@ finance db export                   # Export database to JSON
 
 **Data Files:**
 
-- `.data/finance/snapshots/` - Historical snapshot JSONs (one per statement)
+- `.data/finance/finance.db` - SQLite database (primary storage)
+- `.data/finance/snapshots/` - Historical snapshot JSONs (backup)
 - `personal/finance/statements/` - Statement PDFs (personal data)
 - `finance/templates/FINANCIAL_PLANNING_PROMPT.md` - Planning template (auto-updated)
 - `finance/templates/PLANNING_SESSION.md` - Generated planning session output
@@ -257,9 +259,28 @@ finance db export                   # Export database to JSON
 
 **MCP Server:** Available via the `finance` MCP server with tools: `pull_statement`, `parse_statement`, `get_finance_history`, `get_finance_summary`, `get_portfolio`, `generate_planning_prompt`, `get_holdings`, `set_holding`, `check_holdings_freshness`, `get_financial_advice`
 
-**API Server:** `finance-api` starts FastAPI on port 8000. Use `--db` flag to enable PostgreSQL backend. Endpoints: `/api/v1/portfolio`, `/api/v1/holdings`, `/api/v1/profile`, `/api/v1/advice`, `/api/v1/statements/history`. OpenAPI docs at `/docs`.
+**API Server:** `finance-api` starts FastAPI on port 8000. Endpoints: `/api/v1/portfolio`, `/api/v1/holdings`, `/api/v1/profile`, `/api/v1/advice`, `/api/v1/statements/history`, `/api/v1/projection/*`. OpenAPI docs at `/docs`.
 
-**Database:** Optional PostgreSQL backend via Docker. Enable with `finance-api --db` or `export FINANCE_USE_DATABASE=true`. Uses dual-write (DB + JSON) during migration. See `finance/USAGE.md` for details.
+**Database:** SQLite database at `.data/finance/finance.db` (no Docker required). Run `finance db migrate` to initialize. Set `FINANCE_USE_DATABASE=false` to use only JSON files. See `finance/USAGE.md` for details.
+
+**Development Environment:** `finance-dev` starts API server and web app with one command:
+
+```bash
+finance-dev              # Start all services and tail logs
+finance-dev --quiet      # Start without tailing logs
+finance-dev --logs       # Tail logs from running services
+finance-dev --status     # Check what's running
+finance-dev --stop       # Stop all services
+finance-dev --restart    # Stop then start all services
+```
+
+Services started:
+
+- FastAPI server (port 8000, with `--reload` for development)
+- Next.js web app (port 3000)
+- SQLite database (auto-managed, no separate process)
+
+The script is idempotent - it won't restart services that are already running. Ctrl+C detaches from logs but keeps services running. Use `finance-dev --stop` to fully stop all services.
 
 ### MIDI Generator (`automations/mcp-servers/midi/`)
 
@@ -336,7 +357,8 @@ bin/
 ├── wherewasi → ../automations/daily/wherewasi.sh
 ├── todos → ../automations/tools/todos.sh
 ├── finance → ../finance/finance.sh
-└── finance-api → ../finance/finance-api.sh
+├── finance-api → ../finance/finance-api.sh
+└── finance-dev → ../finance/finance-dev.sh
 ```
 
 After updating PATH, reload your shell: `source ~/.zshrc`

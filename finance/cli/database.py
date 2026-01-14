@@ -1,30 +1,29 @@
 """
 Database connection management and utilities for the finance CLI.
-Uses PostgreSQL with psycopg2.
+Uses SQLite for local storage (no Docker required).
 """
 
-import os
 import json
+import sqlite3
+from collections import defaultdict
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+from config import DATABASE_PATH, SNAPSHOTS_DIR, HOLDINGS_PATH, PROFILE_PATH
 
-from config import SNAPSHOTS_DIR, HOLDINGS_PATH, PROFILE_PATH
 
-# Database connection URL
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://finance:finance@localhost:5432/finance"
-)
+def dict_factory(cursor, row):
+    """Convert sqlite3 rows to dicts."""
+    return {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
 
 
 @contextmanager
 def get_connection():
-    """Get database connection with dict cursor and automatic commit/rollback."""
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    """Get SQLite connection with dict cursor and automatic commit/rollback."""
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DATABASE_PATH))
+    conn.row_factory = dict_factory
     try:
         yield conn
         conn.commit()
@@ -35,21 +34,31 @@ def get_connection():
         conn.close()
 
 
+def init_database():
+    """Initialize database schema from schema_sqlite.sql."""
+    schema_path = Path(__file__).parent.parent / "schema_sqlite.sql"
+    if not schema_path.exists():
+        raise FileNotFoundError(f"Schema file not found: {schema_path}")
+
+    with get_connection() as conn:
+        conn.executescript(schema_path.read_text())
+
+
 def check_db_connection() -> dict:
-    """Check if database is reachable and return status."""
+    """Check if database is accessible and return status."""
     try:
         with get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT version()")
-            version = cur.fetchone()["version"]
+            cur.execute("SELECT sqlite_version()")
+            version = cur.fetchone()["sqlite_version()"]
             cur.execute("""
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'public'
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name NOT LIKE 'sqlite_%'
             """)
-            tables = [row["table_name"] for row in cur.fetchall()]
+            tables = [row["name"] for row in cur.fetchall()]
         return {
             "connected": True,
-            "version": version.split(",")[0],
+            "version": f"SQLite {version}",
             "tables": tables,
         }
     except Exception as e:
@@ -61,12 +70,16 @@ def check_db_connection() -> dict:
 
 def get_table_counts() -> dict:
     """Get row counts for all tables."""
+    tables = ["snapshots", "holdings", "profile", "goals", "goal_progress", "market_cache", "projection_scenarios"]
     with get_connection() as conn:
         cur = conn.cursor()
         counts = {}
-        for table in ["snapshots", "holdings", "profile", "goals", "goal_progress", "market_cache"]:
-            cur.execute(f"SELECT COUNT(*) as count FROM {table}")
-            counts[table] = cur.fetchone()["count"]
+        for table in tables:
+            try:
+                cur.execute(f"SELECT COUNT(*) as count FROM {table}")
+                counts[table] = cur.fetchone()["count"]
+            except sqlite3.OperationalError:
+                counts[table] = 0
         return counts
 
 
@@ -76,9 +89,11 @@ def get_table_counts() -> dict:
 
 def migrate_from_json() -> dict:
     """
-    One-time migration from existing JSON files to PostgreSQL.
+    One-time migration from existing JSON files to SQLite.
     Returns summary of migrated records.
     """
+    init_database()
+
     results = {
         "snapshots": 0,
         "holdings": 0,
@@ -128,16 +143,11 @@ def _insert_snapshot_from_json(cur, data: dict, source_file: str):
     period = data.get("period", {})
 
     cur.execute("""
-        INSERT INTO snapshots (
+        INSERT OR REPLACE INTO snapshots (
             statement_date, account_type, account_id, account_holder,
             period_start, period_end, total_value, securities_value,
             fdic_deposits, holdings, income, retirement, source_file
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (statement_date, account_type) DO UPDATE SET
-            total_value = EXCLUDED.total_value,
-            holdings = EXCLUDED.holdings,
-            income = EXCLUDED.income,
-            retirement = EXCLUDED.retirement
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get("statement_date"),
         data.get("account_type"),
@@ -163,38 +173,24 @@ def _migrate_holdings(cur, holdings: dict) -> int:
     # Crypto holdings
     for key, value in holdings.get("crypto", {}).items():
         cur.execute("""
-            INSERT INTO holdings (category, key, display_name, quantity, notes, last_updated)
-            VALUES ('crypto', %s, %s, %s, %s, %s)
-            ON CONFLICT (category, key) DO UPDATE SET
-                quantity = EXCLUDED.quantity,
-                notes = EXCLUDED.notes,
-                last_updated = EXCLUDED.last_updated
+            INSERT OR REPLACE INTO holdings (category, key, display_name, quantity, notes, last_updated)
+            VALUES ('crypto', ?, ?, ?, ?, ?)
         """, (key, key.upper(), value.get("quantity"), value.get("notes"), last_updated))
         count += 1
 
     # Bank accounts
     for key, value in holdings.get("bank_accounts", {}).items():
         cur.execute("""
-            INSERT INTO holdings (category, key, display_name, balance, notes, last_updated)
-            VALUES ('bank', %s, %s, %s, %s, %s)
-            ON CONFLICT (category, key) DO UPDATE SET
-                display_name = EXCLUDED.display_name,
-                balance = EXCLUDED.balance,
-                notes = EXCLUDED.notes,
-                last_updated = EXCLUDED.last_updated
+            INSERT OR REPLACE INTO holdings (category, key, display_name, balance, notes, last_updated)
+            VALUES ('bank', ?, ?, ?, ?, ?)
         """, (key, value.get("name", key.upper()), value.get("balance"), value.get("notes"), last_updated))
         count += 1
 
     # Other accounts
     for key, value in holdings.get("other", {}).items():
         cur.execute("""
-            INSERT INTO holdings (category, key, display_name, balance, notes, last_updated)
-            VALUES ('other', %s, %s, %s, %s, %s)
-            ON CONFLICT (category, key) DO UPDATE SET
-                display_name = EXCLUDED.display_name,
-                balance = EXCLUDED.balance,
-                notes = EXCLUDED.notes,
-                last_updated = EXCLUDED.last_updated
+            INSERT OR REPLACE INTO holdings (category, key, display_name, balance, notes, last_updated)
+            VALUES ('other', ?, ?, ?, ?, ?)
         """, (key, value.get("name", key.upper()), value.get("balance"), value.get("notes"), last_updated))
         count += 1
 
@@ -207,14 +203,11 @@ def _migrate_profile(cur, profile: dict) -> tuple[int, int]:
     goals_count = 0
 
     # Store profile sections as key-value pairs
-    for key in ["monthly_cash_flow", "household_context", "tax_situation"]:
-        if key in profile:
+    for key in ["monthly_cash_flow", "household_context", "tax_situation", "projection_settings"]:
+        if key in profile and profile[key] is not None:
             cur.execute("""
-                INSERT INTO profile (key, value)
-                VALUES (%s, %s)
-                ON CONFLICT (key) DO UPDATE SET
-                    value = EXCLUDED.value,
-                    updated_at = NOW()
+                INSERT OR REPLACE INTO profile (key, value, updated_at)
+                VALUES (?, ?, datetime('now'))
             """, (key, json.dumps(profile[key])))
             keys_count += 1
 
@@ -224,13 +217,8 @@ def _migrate_profile(cur, profile: dict) -> tuple[int, int]:
         goal = goals.get(goal_type, {})
         if goal:
             cur.execute("""
-                INSERT INTO goals (goal_type, description, target, deadline)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (goal_type) DO UPDATE SET
-                    description = EXCLUDED.description,
-                    target = EXCLUDED.target,
-                    deadline = EXCLUDED.deadline,
-                    updated_at = NOW()
+                INSERT OR REPLACE INTO goals (goal_type, description, target, deadline, updated_at)
+                VALUES (?, ?, ?, ?, datetime('now'))
             """, (goal_type, goal.get("description"), goal.get("target"), goal.get("deadline")))
             goals_count += 1
 
@@ -245,10 +233,15 @@ def get_latest_by_account_type() -> dict:
     """Get most recent snapshot for each account type."""
     with get_connection() as conn:
         cur = conn.cursor()
+        # SQLite equivalent of DISTINCT ON using subquery
         cur.execute("""
-            SELECT DISTINCT ON (account_type) *
-            FROM snapshots
-            ORDER BY account_type, statement_date DESC
+            SELECT s.* FROM snapshots s
+            INNER JOIN (
+                SELECT account_type, MAX(statement_date) as max_date
+                FROM snapshots
+                GROUP BY account_type
+            ) latest ON s.account_type = latest.account_type
+                    AND s.statement_date = latest.max_date
         """)
         return {row["account_type"]: dict(row) for row in cur.fetchall()}
 
@@ -260,23 +253,23 @@ def get_snapshot_history(
     limit: int = None
 ) -> list:
     """Query snapshots with optional filters."""
-    query = "SELECT * FROM snapshots WHERE TRUE"
+    query = "SELECT * FROM snapshots WHERE 1=1"
     params = []
 
     if account_type:
-        query += " AND account_type = %s"
+        query += " AND account_type = ?"
         params.append(account_type)
     if start_date:
-        query += " AND statement_date >= %s"
+        query += " AND statement_date >= ?"
         params.append(start_date)
     if end_date:
-        query += " AND statement_date <= %s"
+        query += " AND statement_date <= ?"
         params.append(end_date)
 
     query += " ORDER BY statement_date DESC"
 
     if limit:
-        query += " LIMIT %s"
+        query += " LIMIT ?"
         params.append(limit)
 
     with get_connection() as conn:
@@ -291,7 +284,7 @@ def get_latest_snapshot(account_type: str = None) -> dict | None:
     params = []
 
     if account_type:
-        query += " WHERE account_type = %s"
+        query += " WHERE account_type = ?"
         params.append(account_type)
 
     query += " ORDER BY statement_date DESC LIMIT 1"
@@ -311,17 +304,11 @@ def save_snapshot(data: dict, source_file: str = None) -> int:
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO snapshots (
+            INSERT OR REPLACE INTO snapshots (
                 statement_date, account_type, account_id, account_holder,
                 period_start, period_end, total_value, securities_value,
                 fdic_deposits, holdings, income, retirement, source_file
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (statement_date, account_type) DO UPDATE SET
-                total_value = EXCLUDED.total_value,
-                holdings = EXCLUDED.holdings,
-                income = EXCLUDED.income,
-                retirement = EXCLUDED.retirement
-            RETURNING id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data.get("statement_date"),
             data.get("account_type"),
@@ -337,7 +324,7 @@ def save_snapshot(data: dict, source_file: str = None) -> int:
             json.dumps(data.get("retirement")),
             source_file,
         ))
-        return cur.fetchone()["id"]
+        return cur.lastrowid
 
 
 # =============================================================================
@@ -399,22 +386,22 @@ def set_holding(category: str, key: str, value: float, notes: str = None) -> Non
         if category == "crypto":
             cur.execute("""
                 INSERT INTO holdings (category, key, display_name, quantity, notes, last_updated)
-                VALUES ('crypto', %s, %s, %s, %s, %s)
-                ON CONFLICT (category, key) DO UPDATE SET
-                    quantity = EXCLUDED.quantity,
-                    notes = COALESCE(EXCLUDED.notes, holdings.notes),
-                    last_updated = EXCLUDED.last_updated
+                VALUES ('crypto', ?, ?, ?, ?, ?)
+                ON CONFLICT(category, key) DO UPDATE SET
+                    quantity = excluded.quantity,
+                    notes = COALESCE(excluded.notes, holdings.notes),
+                    last_updated = excluded.last_updated
             """, (key, key.upper(), value, notes, today))
         else:
             # bank or other
             db_category = "bank" if category == "bank_accounts" else category
             cur.execute("""
                 INSERT INTO holdings (category, key, display_name, balance, notes, last_updated)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (category, key) DO UPDATE SET
-                    balance = EXCLUDED.balance,
-                    notes = COALESCE(EXCLUDED.notes, holdings.notes),
-                    last_updated = EXCLUDED.last_updated
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(category, key) DO UPDATE SET
+                    balance = excluded.balance,
+                    notes = COALESCE(excluded.notes, holdings.notes),
+                    last_updated = excluded.last_updated
             """, (db_category, key, key.upper(), value, notes, today))
 
 
@@ -424,7 +411,7 @@ def delete_holding(category: str, key: str) -> bool:
         cur = conn.cursor()
         db_category = "bank" if category == "bank_accounts" else category
         cur.execute("""
-            DELETE FROM holdings WHERE category = %s AND key = %s
+            DELETE FROM holdings WHERE category = ? AND key = ?
         """, (db_category, key))
         return cur.rowcount > 0
 
@@ -451,7 +438,13 @@ def get_profile() -> dict:
         cur.execute("SELECT key, value FROM profile")
         result = {}
         for row in cur.fetchall():
-            result[row["key"]] = row["value"]
+            value = row["value"]
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+            result[row["key"]] = value
 
         # Get goals
         cur.execute("""
@@ -477,14 +470,14 @@ def save_profile(profile: dict) -> None:
         cur = conn.cursor()
 
         # Save profile sections
-        for key in ["monthly_cash_flow", "household_context", "tax_situation"]:
-            if key in profile:
+        for key in ["monthly_cash_flow", "household_context", "tax_situation", "projection_settings"]:
+            if key in profile and profile[key] is not None:
                 cur.execute("""
-                    INSERT INTO profile (key, value)
-                    VALUES (%s, %s)
-                    ON CONFLICT (key) DO UPDATE SET
-                        value = EXCLUDED.value,
-                        updated_at = NOW()
+                    INSERT INTO profile (key, value, updated_at)
+                    VALUES (?, ?, datetime('now'))
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        updated_at = datetime('now')
                 """, (key, json.dumps(profile[key])))
 
         # Save goals
@@ -492,13 +485,13 @@ def save_profile(profile: dict) -> None:
         for goal_type in ["short_term", "medium_term", "long_term"]:
             goal = goals.get(goal_type, {})
             cur.execute("""
-                INSERT INTO goals (goal_type, description, target, deadline)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (goal_type) DO UPDATE SET
-                    description = EXCLUDED.description,
-                    target = EXCLUDED.target,
-                    deadline = EXCLUDED.deadline,
-                    updated_at = NOW()
+                INSERT INTO goals (goal_type, description, target, deadline, updated_at)
+                VALUES (?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(goal_type) DO UPDATE SET
+                    description = excluded.description,
+                    target = excluded.target,
+                    deadline = excluded.deadline,
+                    updated_at = datetime('now')
             """, (goal_type, goal.get("description"), goal.get("target"), goal.get("deadline")))
 
 
@@ -507,11 +500,11 @@ def update_profile_section(section: str, data: dict) -> None:
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO profile (key, value)
-            VALUES (%s, %s)
-            ON CONFLICT (key) DO UPDATE SET
-                value = EXCLUDED.value,
-                updated_at = NOW()
+            INSERT INTO profile (key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = datetime('now')
         """, (section, json.dumps(data)))
 
 
@@ -523,7 +516,7 @@ def record_goal_progress(goal_analysis: dict) -> None:
     """Record goal progress snapshot (called when statements are pulled)."""
     with get_connection() as conn:
         cur = conn.cursor()
-        today = date.today().replace(day=1)  # First of month
+        today = date.today().replace(day=1).isoformat()  # First of month
 
         for goal_type in ["short_term", "medium_term", "long_term"]:
             goal = goal_analysis.get(goal_type, {})
@@ -532,19 +525,19 @@ def record_goal_progress(goal_analysis: dict) -> None:
                     INSERT INTO goal_progress (
                         goal_type, recorded_at, current_value,
                         progress_pct, monthly_required, on_track
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (goal_type, recorded_at) DO UPDATE SET
-                        current_value = EXCLUDED.current_value,
-                        progress_pct = EXCLUDED.progress_pct,
-                        monthly_required = EXCLUDED.monthly_required,
-                        on_track = EXCLUDED.on_track
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(goal_type, recorded_at) DO UPDATE SET
+                        current_value = excluded.current_value,
+                        progress_pct = excluded.progress_pct,
+                        monthly_required = excluded.monthly_required,
+                        on_track = excluded.on_track
                 """, (
                     goal_type,
                     today,
                     goal.get("current"),
                     goal.get("progress_pct"),
                     goal.get("monthly_required"),
-                    goal.get("on_track"),
+                    1 if goal.get("on_track") else 0,
                 ))
 
 
@@ -555,14 +548,14 @@ def get_goal_history(goal_type: str = None, months: int = 12) -> list:
         if goal_type:
             cur.execute("""
                 SELECT * FROM goal_progress
-                WHERE goal_type = %s
-                  AND recorded_at >= CURRENT_DATE - INTERVAL '%s months'
+                WHERE goal_type = ?
+                  AND recorded_at >= DATE('now', '-' || ? || ' months')
                 ORDER BY recorded_at
             """, (goal_type, months))
         else:
             cur.execute("""
                 SELECT * FROM goal_progress
-                WHERE recorded_at >= CURRENT_DATE - INTERVAL '%s months'
+                WHERE recorded_at >= DATE('now', '-' || ? || ' months')
                 ORDER BY goal_type, recorded_at
             """, (months,))
         return [dict(row) for row in cur.fetchall()]
@@ -578,10 +571,15 @@ def get_cached_market_data(cache_key: str) -> dict | None:
         cur = conn.cursor()
         cur.execute("""
             SELECT data FROM market_cache
-            WHERE cache_key = %s AND expires_at > NOW()
+            WHERE cache_key = ? AND expires_at > datetime('now')
         """, (cache_key,))
         row = cur.fetchone()
-        return row["data"] if row else None
+        if row:
+            data = row["data"]
+            if isinstance(data, str):
+                return json.loads(data)
+            return data
+        return None
 
 
 def cache_market_data(cache_key: str, data: dict, ttl_minutes: int = 15) -> None:
@@ -590,11 +588,11 @@ def cache_market_data(cache_key: str, data: dict, ttl_minutes: int = 15) -> None
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO market_cache (cache_key, data, fetched_at, expires_at)
-            VALUES (%s, %s, NOW(), NOW() + INTERVAL '%s minutes')
-            ON CONFLICT (cache_key) DO UPDATE SET
-                data = EXCLUDED.data,
-                fetched_at = EXCLUDED.fetched_at,
-                expires_at = EXCLUDED.expires_at
+            VALUES (?, ?, datetime('now'), datetime('now', '+' || ? || ' minutes'))
+            ON CONFLICT(cache_key) DO UPDATE SET
+                data = excluded.data,
+                fetched_at = excluded.fetched_at,
+                expires_at = excluded.expires_at
         """, (cache_key, json.dumps(data), ttl_minutes))
 
 
@@ -607,24 +605,35 @@ def clear_market_cache() -> int:
 
 
 # =============================================================================
-# PORTFOLIO HISTORY (NEW CAPABILITY)
+# PORTFOLIO HISTORY
 # =============================================================================
 
 def get_portfolio_history(months: int = 12) -> list:
     """Get total portfolio value over time for charts."""
     with get_connection() as conn:
         cur = conn.cursor()
+        # Fetch raw data and aggregate in Python (SQLite doesn't have jsonb_object_agg)
         cur.execute("""
-            SELECT
-                statement_date,
-                SUM(total_value) as total_value,
-                jsonb_object_agg(account_type, total_value) as by_account
+            SELECT statement_date, account_type, total_value
             FROM snapshots
-            WHERE statement_date >= CURRENT_DATE - INTERVAL '%s months'
-            GROUP BY statement_date
+            WHERE statement_date >= DATE('now', '-' || ? || ' months')
             ORDER BY statement_date
         """, (months,))
-        return [dict(row) for row in cur.fetchall()]
+        rows = cur.fetchall()
+
+    # Group by date in Python
+    by_date = defaultdict(dict)
+    for row in rows:
+        by_date[row["statement_date"]][row["account_type"]] = float(row["total_value"])
+
+    return [
+        {
+            "statement_date": date_str,
+            "total_value": sum(accounts.values()),
+            "by_account": accounts
+        }
+        for date_str, accounts in sorted(by_date.items())
+    ]
 
 
 # =============================================================================
@@ -638,4 +647,184 @@ def export_to_json() -> dict:
         "holdings": get_all_holdings(),
         "profile": get_profile(),
         "goal_progress": get_goal_history(months=120),  # All history
+    }
+
+
+# =============================================================================
+# PROJECTION SCENARIOS
+# =============================================================================
+
+def create_projection_scenario(name: str, settings: dict, is_primary: bool = False) -> dict:
+    """
+    Create a new projection scenario.
+
+    If is_primary=True, atomically unsets other primaries.
+
+    Returns:
+        The created scenario dict
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        if is_primary:
+            # Unset any existing primary scenarios first
+            cur.execute("""
+                UPDATE projection_scenarios
+                SET is_primary = 0, updated_at = datetime('now')
+                WHERE is_primary = 1
+            """)
+
+        cur.execute("""
+            INSERT INTO projection_scenarios (name, settings, is_primary)
+            VALUES (?, ?, ?)
+        """, (name, json.dumps(settings), 1 if is_primary else 0))
+
+        scenario_id = cur.lastrowid
+
+        # Fetch the created row
+        cur.execute("""
+            SELECT id, name, is_primary, settings, created_at, updated_at
+            FROM projection_scenarios WHERE id = ?
+        """, (scenario_id,))
+        row = cur.fetchone()
+        return _format_scenario(row)
+
+
+def get_projection_scenarios() -> list:
+    """Get all projection scenarios."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, is_primary, settings, created_at, updated_at
+            FROM projection_scenarios
+            ORDER BY is_primary DESC, name ASC
+        """)
+        return [_format_scenario(row) for row in cur.fetchall()]
+
+
+def get_projection_scenario(scenario_id: int) -> dict | None:
+    """Get a single scenario by ID."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, is_primary, settings, created_at, updated_at
+            FROM projection_scenarios
+            WHERE id = ?
+        """, (scenario_id,))
+        row = cur.fetchone()
+        return _format_scenario(row) if row else None
+
+
+def update_projection_scenario(
+    scenario_id: int,
+    name: str = None,
+    settings: dict = None,
+    is_primary: bool = None
+) -> dict | None:
+    """
+    Update a projection scenario.
+
+    Returns:
+        Updated scenario dict, or None if not found
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        # Check if exists
+        cur.execute("SELECT id FROM projection_scenarios WHERE id = ?", (scenario_id,))
+        if not cur.fetchone():
+            return None
+
+        # Build dynamic update
+        updates = []
+        params = []
+
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+
+        if settings is not None:
+            updates.append("settings = ?")
+            params.append(json.dumps(settings))
+
+        if is_primary is not None:
+            if is_primary:
+                # Unset other primaries first
+                cur.execute("""
+                    UPDATE projection_scenarios
+                    SET is_primary = 0, updated_at = datetime('now')
+                    WHERE is_primary = 1 AND id != ?
+                """, (scenario_id,))
+            updates.append("is_primary = ?")
+            params.append(1 if is_primary else 0)
+
+        if not updates:
+            # Nothing to update, just return current
+            cur.execute("SELECT * FROM projection_scenarios WHERE id = ?", (scenario_id,))
+            row = cur.fetchone()
+            return _format_scenario(row) if row else None
+
+        updates.append("updated_at = datetime('now')")
+        params.append(scenario_id)
+
+        query = f"""
+            UPDATE projection_scenarios
+            SET {", ".join(updates)}
+            WHERE id = ?
+        """
+        cur.execute(query, params)
+
+        # Fetch updated row
+        cur.execute("""
+            SELECT id, name, is_primary, settings, created_at, updated_at
+            FROM projection_scenarios WHERE id = ?
+        """, (scenario_id,))
+        row = cur.fetchone()
+        return _format_scenario(row) if row else None
+
+
+def delete_projection_scenario(scenario_id: int) -> tuple[bool, str | None]:
+    """
+    Delete a projection scenario.
+
+    Cannot delete a primary scenario - must reassign first.
+
+    Returns:
+        (success, error_message)
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        # Check if primary
+        cur.execute("""
+            SELECT is_primary FROM projection_scenarios WHERE id = ?
+        """, (scenario_id,))
+
+        row = cur.fetchone()
+        if not row:
+            return False, "Scenario not found"
+
+        if row["is_primary"]:
+            return False, "Cannot delete primary scenario. Set another scenario as primary first."
+
+        cur.execute("DELETE FROM projection_scenarios WHERE id = ?", (scenario_id,))
+        return True, None
+
+
+def _format_scenario(row: dict) -> dict:
+    """Format a scenario row for API response."""
+    if not row:
+        return None
+
+    settings = row.get("settings")
+    if isinstance(settings, str):
+        settings = json.loads(settings)
+
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "is_primary": bool(row["is_primary"]),
+        "settings": settings,
+        "created_at": str(row["created_at"]) if row.get("created_at") else None,
+        "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
     }

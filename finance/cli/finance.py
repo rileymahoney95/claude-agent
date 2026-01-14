@@ -14,7 +14,9 @@ Usage:
     finance holdings check [--json]
     finance portfolio [--no-prices] [--json]
     finance advise [--focus <area>] [--json]
-    finance db [start|stop|status|migrate|export|reset] [--json]
+    finance db [status|migrate|export|reset] [--json]
+
+Database: Uses SQLite at .data/finance/finance.db (no Docker required)
 """
 
 import argparse
@@ -116,25 +118,17 @@ def main():
     advise_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # db command
-    db_parser = subparsers.add_parser("db", help="Database management")
+    db_parser = subparsers.add_parser("db", help="Database management (SQLite)")
     db_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     db_subparsers = db_parser.add_subparsers(dest="db_command")
 
-    # db start
-    db_start_parser = db_subparsers.add_parser("start", help="Start PostgreSQL container")
-    db_start_parser.add_argument("--json", action="store_true", help="Output as JSON")
-
-    # db stop
-    db_stop_parser = db_subparsers.add_parser("stop", help="Stop PostgreSQL container")
-    db_stop_parser.add_argument("--json", action="store_true", help="Output as JSON")
-
     # db status
-    db_status_parser = db_subparsers.add_parser("status", help="Check database connection")
+    db_status_parser = db_subparsers.add_parser("status", help="Check database status")
     db_status_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # db migrate
-    db_migrate_parser = db_subparsers.add_parser("migrate", help="Migrate JSON data to database")
+    db_migrate_parser = db_subparsers.add_parser("migrate", help="Migrate JSON data to SQLite")
     db_migrate_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # db export
@@ -142,7 +136,7 @@ def main():
     db_export_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # db reset
-    db_reset_parser = db_subparsers.add_parser("reset", help="Reset database (delete all data)")
+    db_reset_parser = db_subparsers.add_parser("reset", help="Reset database (delete SQLite file)")
     db_reset_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()

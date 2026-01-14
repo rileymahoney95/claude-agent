@@ -17,13 +17,11 @@ PROFILE_PATH = REPO_ROOT / ".config" / "finance-profile.json"
 HOLDINGS_PATH = REPO_ROOT / ".config" / "holdings.json"
 
 # Database configuration
-# Set USE_DATABASE=true to enable PostgreSQL storage
-# When enabled, data is read from the database and written to both DB and JSON (dual-write)
-USE_DATABASE = os.environ.get("FINANCE_USE_DATABASE", "").lower() in ("true", "1", "yes")
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://finance:finance@localhost:5432/finance"
-)
+# SQLite database file (always available, no Docker needed)
+DATABASE_PATH = DATA_DIR / "finance.db"
+
+# Set USE_DATABASE=false to disable SQLite and use only JSON files
+USE_DATABASE = os.environ.get("FINANCE_USE_DATABASE", "true").lower() not in ("false", "0", "no")
 
 # CoinGecko API for crypto prices
 COINGECKO_API_BASE = "https://api.coingecko.com/api/v3"
@@ -81,6 +79,7 @@ DEFAULT_PROFILE = {
         "medium_term": {"description": None, "target": None, "deadline": None},
         "long_term": {"description": None, "target": None, "deadline": None},
     },
+    "projection_settings": None,  # Will use DEFAULT_PROJECTION_SETTINGS when None
     "last_updated": None,
 }
 
@@ -162,3 +161,25 @@ SURPLUS_PRIORITY_ORDER = [
     "allocation_drift",     # Redirect to under-allocated categories
     "default_split",        # Standard split per target allocation
 ]
+
+# ============================================================================
+# PHASE 5: PROJECTION CONFIGURATION
+# ============================================================================
+
+# Default expected returns by ASSET CLASS (annual %, nominal)
+# Used for portfolio projection calculations
+DEFAULT_EXPECTED_RETURNS = {
+    "equities": 7.0,         # Broad equities assumption
+    "bonds": 4.0,            # Conservative fixed income
+    "crypto": 12.0,          # Higher risk/reward
+    "cash": 4.5,             # Current HYSA rates
+}
+
+# Default projection settings for Coast FIRE and forecasting
+DEFAULT_PROJECTION_SETTINGS = {
+    "expected_returns": DEFAULT_EXPECTED_RETURNS,
+    "inflation_rate": 3.0,        # Annual inflation %
+    "withdrawal_rate": 4.0,       # Safe withdrawal rate for Coast FIRE
+    "target_retirement_age": 65,  # Retirement target
+    "current_age": 32,            # User sets once
+}

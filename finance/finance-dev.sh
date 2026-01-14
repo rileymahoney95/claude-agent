@@ -1,6 +1,6 @@
 #!/bin/bash
 # Finance development environment startup script
-# Starts database, API server, and web app
+# Starts API server and web app (SQLite database is auto-managed)
 # Usage: finance-dev [--stop] [--restart] [--status] [--quiet]
 
 set -e
@@ -29,6 +29,9 @@ WEB_PORT=3000
 # PID file location
 PID_DIR="$SCRIPT_DIR/.pids"
 
+# Database location
+DB_PATH="$SCRIPT_DIR/../.data/finance/finance.db"
+
 log_info() { echo -e "${GREEN}✓${NC} $1"; }
 log_warn() { echo -e "${YELLOW}⚠${NC} $1"; }
 log_error() { echo -e "${RED}✗${NC} $1"; }
@@ -52,28 +55,24 @@ kill_process_tree() {
   kill -9 "$pid" 2>/dev/null || true
 }
 
-# Check if docker container is running
-is_container_running() {
-  docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^$1$"
-}
-
 # Status check
 status() {
   echo "Finance Dev Environment Status"
   echo "==============================="
-  
-  if is_container_running "finance-db"; then
-    log_info "Database: Running (finance-db container)"
+
+  if [ -f "$DB_PATH" ]; then
+    local db_size=$(du -h "$DB_PATH" | cut -f1)
+    log_info "Database: SQLite ($db_size)"
   else
-    log_warn "Database: Not running"
+    log_warn "Database: Not initialized (will be created on first use)"
   fi
-  
+
   if is_port_in_use $API_PORT; then
     log_info "API Server: Running on port $API_PORT"
   else
     log_warn "API Server: Not running"
   fi
-  
+
   if is_port_in_use $WEB_PORT; then
     log_info "Web App: Running on port $WEB_PORT"
   else
@@ -84,7 +83,7 @@ status() {
 # Stop all services
 stop() {
   echo "Stopping Finance Dev Environment..."
-  
+
   # Stop web app (Next.js on port 3000)
   local web_pids=$(get_listening_pids $WEB_PORT)
   if [ -n "$web_pids" ]; then
@@ -93,14 +92,14 @@ stop() {
       kill_process_tree "$pid"
     done
   fi
-  
+
   # Also check saved PID
   if [ -f "$PID_DIR/web.pid" ]; then
     local saved_pid=$(cat "$PID_DIR/web.pid")
     kill_process_tree "$saved_pid"
     rm -f "$PID_DIR/web.pid"
   fi
-  
+
   # Stop API server
   local api_pids=$(get_listening_pids $API_PORT)
   if [ -n "$api_pids" ]; then
@@ -109,23 +108,17 @@ stop() {
       kill_process_tree "$pid"
     done
   fi
-  
+
   # Also check saved PID
   if [ -f "$PID_DIR/api.pid" ]; then
     local saved_pid=$(cat "$PID_DIR/api.pid")
     kill_process_tree "$saved_pid"
     rm -f "$PID_DIR/api.pid"
   fi
-  
-  # Stop database
-  if is_container_running "finance-db"; then
-    log_info "Stopping database..."
-    docker compose -f "$SCRIPT_DIR/docker-compose.yml" down
-  fi
-  
+
   # Clean up PID directory
   rm -rf "$PID_DIR" 2>/dev/null || true
-  
+
   log_info "All services stopped"
 }
 
@@ -133,40 +126,21 @@ stop() {
 start() {
   echo "Starting Finance Dev Environment..."
   echo ""
-  
-  # 1. Start database
-  if is_container_running "finance-db"; then
-    log_info "Database already running"
-  else
-    log_info "Starting database..."
-    docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d
-    
-    # Wait for database to be healthy
-    echo -n "   Waiting for database..."
-    for i in {1..30}; do
-      if docker exec finance-db pg_isready -U finance >/dev/null 2>&1; then
-        echo " ready!"
-        break
-      fi
-      echo -n "."
-      sleep 1
-    done
-  fi
-  
+
   # Create log and PID directories
   mkdir -p "$SCRIPT_DIR/.logs"
   mkdir -p "$PID_DIR"
-  
-  # 2. Start API server
+
+  # 1. Start API server
   if is_port_in_use $API_PORT; then
     log_info "API server already running on port $API_PORT"
   else
     log_info "Starting API server (port $API_PORT)..."
     cd "$SCRIPT_DIR/api"
-    FINANCE_USE_DATABASE=true "$SCRIPT_DIR/venv/bin/uvicorn" main:app \
+    "$SCRIPT_DIR/venv/bin/uvicorn" main:app \
       --host 0.0.0.0 --port $API_PORT --reload > "$SCRIPT_DIR/.logs/api.log" 2>&1 &
     echo $! > "$PID_DIR/api.pid"
-    
+
     # Wait for API to be ready
     echo -n "   Waiting for API..."
     for i in {1..15}; do
@@ -178,8 +152,8 @@ start() {
       sleep 1
     done
   fi
-  
-  # 3. Start web app
+
+  # 2. Start web app
   if is_port_in_use $WEB_PORT; then
     log_info "Web app already running on port $WEB_PORT"
   else
@@ -187,7 +161,7 @@ start() {
     cd "$SCRIPT_DIR/web"
     npm run dev > "$SCRIPT_DIR/.logs/web.log" 2>&1 &
     echo $! > "$PID_DIR/web.pid"
-    
+
     # Wait for web app to be ready
     echo -n "   Waiting for web app..."
     for i in {1..20}; do
@@ -199,7 +173,7 @@ start() {
       sleep 1
     done
   fi
-  
+
   echo ""
   echo "==============================="
   log_info "Finance Dev Environment Ready!"
@@ -207,11 +181,11 @@ start() {
   echo "  📊 Web App:    http://localhost:$WEB_PORT"
   echo "  🔌 API:        http://localhost:$API_PORT"
   echo "  📚 API Docs:   http://localhost:$API_PORT/docs"
-  echo "  🗄️  Database:   postgresql://finance:finance@localhost:5432/finance"
+  echo "  🗄️  Database:   SQLite at .data/finance/finance.db"
   echo ""
   echo "  📋 Logs:       finance-dev --logs"
   echo "  🛑 Stop:       finance-dev --stop"
-  
+
   # If not quiet, tail the logs
   if [ "$QUIET" = false ]; then
     echo ""
@@ -227,7 +201,7 @@ logs() {
     log_error "No logs found. Start services first with 'finance-dev'"
     exit 1
   fi
-  
+
   echo "Tailing logs (Ctrl+C to stop)..."
   echo "==============================="
   tail -f "$SCRIPT_DIR/.logs/api.log" "$SCRIPT_DIR/.logs/web.log"
@@ -264,6 +238,8 @@ case "${1:-}" in
     echo "  --restart, -r Stop then start all services"
     echo "  --status      Show status of all services"
     echo "  --help, -h    Show this help"
+    echo ""
+    echo "Database: Uses SQLite at .data/finance/finance.db (no Docker required)"
     ;;
   "")
     start

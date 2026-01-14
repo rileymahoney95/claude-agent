@@ -1082,11 +1082,7 @@ def cmd_db(args):
     """Handle database commands."""
     db_command = getattr(args, 'db_command', None)
 
-    if db_command == 'start':
-        return _cmd_db_start(args)
-    elif db_command == 'stop':
-        return _cmd_db_stop(args)
-    elif db_command == 'status':
+    if db_command == 'status':
         return _cmd_db_status(args)
     elif db_command == 'migrate':
         return _cmd_db_migrate(args)
@@ -1099,74 +1095,10 @@ def cmd_db(args):
         return _cmd_db_status(args)
 
 
-def _cmd_db_start(args):
-    """Start PostgreSQL container."""
-    compose_file = REPO_ROOT / "finance" / "docker-compose.yml"
-
-    if not compose_file.exists():
-        result = {"success": False, "error": f"docker-compose.yml not found: {compose_file}"}
-        if args.json:
-            print(json.dumps(result))
-        else:
-            print(format_error(result["error"]))
-        return 1
-
-    try:
-        subprocess.run(
-            ["docker", "compose", "up", "-d"],
-            cwd=REPO_ROOT / "finance",
-            check=True,
-            capture_output=not args.json
-        )
-        result = {"success": True, "message": "PostgreSQL container started"}
-        if args.json:
-            print(json.dumps(result))
-        else:
-            print(format_success(result["message"]))
-            print(f"{Style.DIM}Run 'finance db status' to verify connection{Style.RESET_ALL}")
-        return 0
-    except subprocess.CalledProcessError as e:
-        result = {"success": False, "error": f"Failed to start container: {e}"}
-        if args.json:
-            print(json.dumps(result))
-        else:
-            print(format_error(result["error"]))
-        return 1
-    except FileNotFoundError:
-        result = {"success": False, "error": "Docker not found. Install Docker Desktop first."}
-        if args.json:
-            print(json.dumps(result))
-        else:
-            print(format_error(result["error"]))
-        return 1
-
-
-def _cmd_db_stop(args):
-    """Stop PostgreSQL container."""
-    try:
-        subprocess.run(
-            ["docker", "compose", "down"],
-            cwd=REPO_ROOT / "finance",
-            check=True,
-            capture_output=not args.json
-        )
-        result = {"success": True, "message": "PostgreSQL container stopped"}
-        if args.json:
-            print(json.dumps(result))
-        else:
-            print(format_success(result["message"]))
-        return 0
-    except subprocess.CalledProcessError as e:
-        result = {"success": False, "error": f"Failed to stop container: {e}"}
-        if args.json:
-            print(json.dumps(result))
-        else:
-            print(format_error(result["error"]))
-        return 1
-
-
 def _cmd_db_status(args):
     """Check database connection status."""
+    from config import DATABASE_PATH
+
     try:
         from database import check_db_connection, get_table_counts
     except ImportError as e:
@@ -1178,6 +1110,7 @@ def _cmd_db_status(args):
         return 1
 
     status = check_db_connection()
+    status["database_path"] = str(DATABASE_PATH)
 
     if args.json:
         if status["connected"]:
@@ -1192,6 +1125,11 @@ def _cmd_db_status(args):
     if status["connected"]:
         print(f"  {Fore.GREEN}Connected{Style.RESET_ALL}")
         print(f"  {Style.DIM}Version: {status.get('version', 'Unknown')}{Style.RESET_ALL}")
+        print(f"  {Style.DIM}Path: {DATABASE_PATH}{Style.RESET_ALL}")
+        if DATABASE_PATH.exists():
+            size_bytes = DATABASE_PATH.stat().st_size
+            size_kb = size_bytes / 1024
+            print(f"  {Style.DIM}Size: {size_kb:.1f} KB{Style.RESET_ALL}")
         print()
 
         tables = status.get("tables", [])
@@ -1207,19 +1145,21 @@ def _cmd_db_status(args):
         if not USE_DATABASE:
             print(f"{Style.DIM}Set FINANCE_USE_DATABASE=true to enable{Style.RESET_ALL}")
     else:
-        print(f"  {Fore.RED}Not connected{Style.RESET_ALL}")
-        print(f"  {Style.DIM}Error: {status.get('error', 'Unknown')}{Style.RESET_ALL}")
+        print(f"  {Fore.YELLOW}Not initialized{Style.RESET_ALL}")
+        print(f"  {Style.DIM}Path: {DATABASE_PATH}{Style.RESET_ALL}")
         print()
-        print(f"{Style.DIM}Run 'finance db start' to start the PostgreSQL container{Style.RESET_ALL}")
+        print(f"{Style.DIM}Run 'finance db migrate' to initialize and import data{Style.RESET_ALL}")
 
     print()
     return 0 if status["connected"] else 1
 
 
 def _cmd_db_migrate(args):
-    """Migrate data from JSON files to database."""
+    """Migrate data from JSON files to SQLite database."""
+    from config import DATABASE_PATH
+
     try:
-        from database import migrate_from_json, check_db_connection
+        from database import migrate_from_json
     except ImportError as e:
         result = {"success": False, "error": f"Database module not available: {e}"}
         if args.json:
@@ -1228,19 +1168,8 @@ def _cmd_db_migrate(args):
             print(format_error(result["error"]))
         return 1
 
-    # Check connection first
-    status = check_db_connection()
-    if not status["connected"]:
-        result = {"success": False, "error": f"Database not connected: {status.get('error')}"}
-        if args.json:
-            print(json.dumps(result))
-        else:
-            print(format_error(result["error"]))
-            print(f"{Style.DIM}Run 'finance db start' first{Style.RESET_ALL}")
-        return 1
-
     if not args.json:
-        print(f"{Style.DIM}Migrating data from JSON files...{Style.RESET_ALL}")
+        print(f"{Style.DIM}Migrating data from JSON files to SQLite...{Style.RESET_ALL}")
 
     try:
         results = migrate_from_json()
@@ -1255,6 +1184,7 @@ def _cmd_db_migrate(args):
     result = {
         "success": len(results.get("errors", [])) == 0,
         "migrated": results,
+        "database_path": str(DATABASE_PATH),
     }
 
     if args.json:
@@ -1279,15 +1209,17 @@ def _cmd_db_migrate(args):
             print(format_success("All data migrated successfully"))
 
         print()
-        print(f"{Style.DIM}Enable database mode with: export FINANCE_USE_DATABASE=true{Style.RESET_ALL}")
+        print(f"{Style.DIM}Database: {DATABASE_PATH}{Style.RESET_ALL}")
 
     return 0 if result["success"] else 1
 
 
 def _cmd_db_export(args):
     """Export database to JSON files."""
+    from config import DATABASE_PATH
+
     try:
-        from database import export_to_json, check_db_connection
+        from database import export_to_json
     except ImportError as e:
         result = {"success": False, "error": f"Database module not available: {e}"}
         if args.json:
@@ -1296,14 +1228,13 @@ def _cmd_db_export(args):
             print(format_error(result["error"]))
         return 1
 
-    # Check connection first
-    status = check_db_connection()
-    if not status["connected"]:
-        result = {"success": False, "error": f"Database not connected: {status.get('error')}"}
+    if not DATABASE_PATH.exists():
+        result = {"success": False, "error": f"Database not found: {DATABASE_PATH}"}
         if args.json:
             print(json.dumps(result))
         else:
             print(format_error(result["error"]))
+            print(f"{Style.DIM}Run 'finance db migrate' to create the database{Style.RESET_ALL}")
         return 1
 
     if not args.json:
@@ -1353,35 +1284,37 @@ def _cmd_db_export(args):
 
 
 def _cmd_db_reset(args):
-    """Reset database (drop and recreate all tables)."""
+    """Reset database (delete SQLite file)."""
+    from config import DATABASE_PATH
+
+    if not DATABASE_PATH.exists():
+        result = {"success": True, "message": "Database file does not exist (nothing to reset)"}
+        if args.json:
+            print(json.dumps(result))
+        else:
+            print(format_success(result["message"]))
+        return 0
+
     if not args.json:
-        print(f"{Fore.RED}WARNING: This will delete ALL data in the database!{Style.RESET_ALL}")
+        size_kb = DATABASE_PATH.stat().st_size / 1024
+        print(f"{Fore.RED}WARNING: This will delete the database file!{Style.RESET_ALL}")
+        print(f"{Style.DIM}Path: {DATABASE_PATH}{Style.RESET_ALL}")
+        print(f"{Style.DIM}Size: {size_kb:.1f} KB{Style.RESET_ALL}")
         confirm = input("Type 'yes' to confirm: ").strip().lower()
         if confirm != 'yes':
             print("Aborted.")
             return 1
 
     try:
-        subprocess.run(
-            ["docker", "compose", "down", "-v"],
-            cwd=REPO_ROOT / "finance",
-            check=True,
-            capture_output=True
-        )
-        subprocess.run(
-            ["docker", "compose", "up", "-d"],
-            cwd=REPO_ROOT / "finance",
-            check=True,
-            capture_output=True
-        )
+        DATABASE_PATH.unlink()
         result = {"success": True, "message": "Database reset complete"}
         if args.json:
             print(json.dumps(result))
         else:
             print(format_success(result["message"]))
-            print(f"{Style.DIM}Run 'finance db migrate' to re-import data{Style.RESET_ALL}")
+            print(f"{Style.DIM}Run 'finance db migrate' to re-import data from JSON files{Style.RESET_ALL}")
         return 0
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         result = {"success": False, "error": f"Reset failed: {e}"}
         if args.json:
             print(json.dumps(result))

@@ -5,10 +5,16 @@ REST API for the finance CLI. Runs on `http://localhost:8000`.
 ## Quick Start
 
 ```bash
+# Recommended: Start full dev environment (API + Web)
+finance-dev
+
+# Or start just the API
 finance-api           # Start server
 finance-api --reload  # Dev mode with auto-reload
 finance-api --port 3001  # Custom port
 ```
+
+Database: Uses SQLite at `.data/finance/finance.db` (no setup required).
 
 ## Endpoints
 
@@ -80,6 +86,51 @@ curl -X POST http://localhost:8000/api/v1/statements/pull
 
 # Pull latest only
 curl -X POST "http://localhost:8000/api/v1/statements/pull?latest=true"
+```
+
+### Projections
+
+```bash
+# Get historical portfolio data (for projection chart)
+curl http://localhost:8000/api/v1/projection/history
+curl "http://localhost:8000/api/v1/projection/history?months=24"
+
+# Get projection settings
+curl http://localhost:8000/api/v1/projection/settings
+
+# Update projection settings
+curl -X PATCH http://localhost:8000/api/v1/projection/settings \
+  -H "Content-Type: application/json" \
+  -d '{"current_age": 33, "target_retirement_age": 60}'
+
+# Update expected returns
+curl -X PATCH http://localhost:8000/api/v1/projection/settings \
+  -H "Content-Type: application/json" \
+  -d '{"expected_returns": {"equities": 8.0, "crypto": 15.0}}'
+
+# List scenarios
+curl http://localhost:8000/api/v1/projection/scenarios
+
+# Create a scenario
+curl -X POST http://localhost:8000/api/v1/projection/scenarios \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Conservative",
+    "settings": {
+      "allocation_overrides": {"equities": 60, "bonds": 30, "crypto": 5, "cash": 5},
+      "return_overrides": {"equities": 6.0, "bonds": 3.5, "crypto": 8.0, "cash": 4.0},
+      "projection_months": 360
+    },
+    "is_primary": true
+  }'
+
+# Update a scenario
+curl -X PATCH http://localhost:8000/api/v1/projection/scenarios/1 \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Very Conservative"}'
+
+# Delete a scenario (cannot delete primary)
+curl -X DELETE http://localhost:8000/api/v1/projection/scenarios/2
 ```
 
 ## Interactive Docs
