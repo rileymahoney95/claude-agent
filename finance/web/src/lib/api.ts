@@ -16,6 +16,12 @@ import type {
   StatementsHistory,
   PullStatementsResponse,
   UploadStatementResponse,
+  ProjectionHistoryResponse,
+  ProjectionSettingsResponse,
+  ProjectionSettingsAPI,
+  ProjectionScenariosResponse,
+  ProjectionScenarioResponse,
+  ScenarioSettingsAPI,
 } from './types';
 
 const API_URL =
@@ -269,6 +275,146 @@ export async function uploadStatement(
       success: false,
       error: error.detail || response.statusText,
     };
+  }
+  return response.json();
+}
+
+// ============================================================================
+// Projections
+// ============================================================================
+
+/**
+ * Get historical portfolio data for projection chart.
+ * @param months - Months of history (1-60)
+ */
+export async function getProjectionHistory(
+  months = 12
+): Promise<ProjectionHistoryResponse> {
+  const params = new URLSearchParams({ months: months.toString() });
+  const response = await fetch(`${API_URL}/projection/history?${params}`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch projection history: ${response.statusText}`
+    );
+  }
+  return response.json();
+}
+
+/**
+ * Get projection settings from profile.
+ */
+export async function getProjectionSettings(): Promise<ProjectionSettingsResponse> {
+  const response = await fetch(`${API_URL}/projection/settings`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch projection settings: ${response.statusText}`
+    );
+  }
+  return response.json();
+}
+
+/**
+ * Update projection settings in profile.
+ */
+export async function updateProjectionSettings(
+  updates: Partial<ProjectionSettingsAPI>
+): Promise<ProjectionSettingsResponse> {
+  const response = await fetch(`${API_URL}/projection/settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || response.statusText);
+  }
+  return response.json();
+}
+
+/**
+ * List all projection scenarios.
+ */
+export async function getProjectionScenarios(): Promise<ProjectionScenariosResponse> {
+  const response = await fetch(`${API_URL}/projection/scenarios`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch scenarios: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Get a single projection scenario by ID.
+ */
+export async function getProjectionScenario(
+  id: number
+): Promise<ProjectionScenarioResponse> {
+  const response = await fetch(`${API_URL}/projection/scenarios/${id}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch scenario: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Create a new projection scenario.
+ */
+export async function createProjectionScenario(
+  name: string,
+  settings?: ScenarioSettingsAPI,
+  isPrimary?: boolean
+): Promise<ProjectionScenarioResponse> {
+  const response = await fetch(`${API_URL}/projection/scenarios`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      settings: settings ?? {},
+      is_primary: isPrimary,
+    }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || response.statusText);
+  }
+  return response.json();
+}
+
+/**
+ * Update a projection scenario.
+ */
+export async function updateProjectionScenario(
+  id: number,
+  updates: {
+    name?: string;
+    settings?: ScenarioSettingsAPI;
+    is_primary?: boolean;
+  }
+): Promise<ProjectionScenarioResponse> {
+  const response = await fetch(`${API_URL}/projection/scenarios/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || response.statusText);
+  }
+  return response.json();
+}
+
+/**
+ * Delete a projection scenario.
+ * Note: Cannot delete primary scenario.
+ */
+export async function deleteProjectionScenario(
+  id: number
+): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_URL}/projection/scenarios/${id}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || response.statusText);
   }
   return response.json();
 }

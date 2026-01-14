@@ -219,6 +219,67 @@ export interface UploadStatementResponse {
   error?: string;
 }
 
+// =============================================================================
+// PROJECTION API TYPES (snake_case from API)
+// =============================================================================
+
+export interface ProjectionHistoryDataPoint {
+  date: string;
+  total_value: number;
+  by_asset_class: Record<string, number>;
+}
+
+export interface ProjectionHistoryResponse {
+  success: boolean;
+  data_points: ProjectionHistoryDataPoint[];
+  range: {
+    start: string | null;
+    end: string | null;
+    months_requested: number;
+    months_available: number;
+  };
+}
+
+export interface ProjectionSettingsAPI {
+  expected_returns: Record<string, number>;
+  inflation_rate: number;
+  withdrawal_rate: number;
+  target_retirement_age: number;
+  current_age: number;
+}
+
+export interface ProjectionSettingsResponse {
+  success: boolean;
+  settings: ProjectionSettingsAPI;
+}
+
+export interface ScenarioSettingsAPI {
+  allocation_overrides?: Record<string, number> | null;
+  return_overrides?: Record<string, number> | null;
+  monthly_contribution?: number | null;
+  projection_months?: number | null;
+}
+
+export interface ProjectionScenarioAPI {
+  id: number;
+  name: string;
+  settings: ScenarioSettingsAPI;
+  is_primary: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectionScenariosResponse {
+  success: boolean;
+  scenarios: ProjectionScenarioAPI[];
+  count: number;
+}
+
+export interface ProjectionScenarioResponse {
+  success: boolean;
+  scenario: ProjectionScenarioAPI;
+}
+
 // Focus options for advice endpoint
 export type AdviceFocus =
   | 'all'
