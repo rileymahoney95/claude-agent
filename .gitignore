@@ -1,7 +1,11 @@
 # Runtime data
-# Runtime data
 .data/
+.logs/
+.pids/
 *.log
+
+# Configuration (contains personal/sensitive data)
+.config/
 
 # Environment and secrets
 .env
@@ -20,3 +24,17 @@ Thumbs.db
 .docs/**
 
 **/personal/**
+
+# Finance templates (auto-generated with real data)
+finance/templates/PLANNING_SESSION.md
+
+# Python virtual environments
+**/venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Node modules
+**/node_modules/

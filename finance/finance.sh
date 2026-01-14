@@ -1,4 +1,7 @@
 #!/bin/bash
+# Finance CLI wrapper script
+# Usage: finance parse <statement.pdf> | finance history | finance summary | finance advise
+
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SOURCE" ]; do
   DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
@@ -6,4 +9,4 @@ while [ -L "$SOURCE" ]; do
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-"$SCRIPT_DIR/todos/venv/bin/python" "$SCRIPT_DIR/todos/todos.py" "$@"
+"$SCRIPT_DIR/venv/bin/python" "$SCRIPT_DIR/cli/finance.py" "$@"

@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""
+Finance CLI tool for parsing brokerage statements and managing financial planning.
+
+Usage:
+    finance parse <statement.pdf> [--no-update] [--json]
+    finance pull [--latest] [--no-update] [--json]
+    finance history [--account <type>] [--json]
+    finance summary [--json]
+    finance plan [--no-save] [--no-copy] [--json]
+    finance profile [--edit] [--reset] [--json]
+    finance holdings [--json]
+    finance holdings set <path> <value> [--notes] [--json]
+    finance holdings check [--json]
+    finance portfolio [--no-prices] [--json]
+    finance advise [--focus <area>] [--json]
+    finance db [start|stop|status|migrate|export|reset] [--json]
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+# Add cli directory to path for imports when running as script
+sys.path.insert(0, str(Path(__file__).parent))
+
+from commands import (
+    cmd_parse,
+    cmd_pull,
+    cmd_history,
+    cmd_summary,
+    cmd_plan,
+    cmd_profile,
+    cmd_holdings,
+    cmd_portfolio,
+    cmd_advise,
+    cmd_db,
+)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Finance CLI for parsing statements and managing financial planning"
+    )
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+
+    # parse command
+    parse_parser = subparsers.add_parser("parse", help="Parse a statement PDF")
+    parse_parser.add_argument("statement", help="Path to the statement PDF")
+    parse_parser.add_argument("--no-update", action="store_true",
+                              help="Don't update the planning template")
+    parse_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # history command
+    history_parser = subparsers.add_parser("history", help="List historical snapshots")
+    history_parser.add_argument("--account", help="Filter by account type")
+    history_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # summary command
+    summary_parser = subparsers.add_parser("summary", help="Show current allocation summary")
+    summary_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # pull command
+    pull_parser = subparsers.add_parser("pull", help="Pull statements from Downloads")
+    pull_parser.add_argument("--latest", action="store_true",
+                             help="Only process the most recent statement (default: all)")
+    pull_parser.add_argument("--no-update", action="store_true",
+                             help="Don't update the planning template")
+    pull_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # plan command
+    plan_parser = subparsers.add_parser("plan", help="Generate populated planning prompt")
+    plan_parser.add_argument("--no-save", action="store_true",
+                             help="Don't save to PLANNING_SESSION.md (default: save)")
+    plan_parser.add_argument("--no-copy", action="store_true",
+                             help="Don't copy to clipboard (default: copy)")
+    plan_parser.add_argument("--json", action="store_true", help="Output as JSON only")
+
+    # profile command
+    profile_parser = subparsers.add_parser("profile", help="View or edit financial profile")
+    profile_parser.add_argument("--edit", action="store_true",
+                                help="Interactively edit profile")
+    profile_parser.add_argument("--reset", action="store_true",
+                                help="Clear profile and re-enter all values")
+    profile_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # holdings command
+    holdings_parser = subparsers.add_parser("holdings", help="View and manage manual holdings")
+    holdings_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    holdings_subparsers = holdings_parser.add_subparsers(dest="holdings_command")
+
+    # holdings set subcommand
+    holdings_set_parser = holdings_subparsers.add_parser("set", help="Set a holding value")
+    holdings_set_parser.add_argument("path", help="Path: crypto.BTC, bank.hysa, other.hsa")
+    holdings_set_parser.add_argument("value", type=float, help="Value (quantity for crypto, balance for others)")
+    holdings_set_parser.add_argument("--notes", "-n", help="Optional notes (crypto only)")
+    holdings_set_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # holdings check subcommand
+    holdings_check_parser = holdings_subparsers.add_parser("check", help="Check if holdings data is stale")
+    holdings_check_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # portfolio command
+    portfolio_parser = subparsers.add_parser("portfolio", help="Unified portfolio view across all accounts")
+    portfolio_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    portfolio_parser.add_argument("--no-prices", action="store_true",
+                                  help="Skip fetching live crypto prices")
+
+    # advise command
+    advise_parser = subparsers.add_parser("advise", help="Get financial recommendations")
+    advise_parser.add_argument("--focus", choices=["all", "goals", "rebalance", "surplus", "opportunities"],
+                               default="all", help="Focus area for recommendations")
+    advise_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # db command
+    db_parser = subparsers.add_parser("db", help="Database management")
+    db_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    db_subparsers = db_parser.add_subparsers(dest="db_command")
+
+    # db start
+    db_start_parser = db_subparsers.add_parser("start", help="Start PostgreSQL container")
+    db_start_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # db stop
+    db_stop_parser = db_subparsers.add_parser("stop", help="Stop PostgreSQL container")
+    db_stop_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # db status
+    db_status_parser = db_subparsers.add_parser("status", help="Check database connection")
+    db_status_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # db migrate
+    db_migrate_parser = db_subparsers.add_parser("migrate", help="Migrate JSON data to database")
+    db_migrate_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # db export
+    db_export_parser = db_subparsers.add_parser("export", help="Export database to JSON")
+    db_export_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # db reset
+    db_reset_parser = db_subparsers.add_parser("reset", help="Reset database (delete all data)")
+    db_reset_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    args = parser.parse_args()
+
+    if args.command == "parse":
+        return cmd_parse(args)
+    elif args.command == "history":
+        return cmd_history(args)
+    elif args.command == "summary":
+        return cmd_summary(args)
+    elif args.command == "pull":
+        return cmd_pull(args)
+    elif args.command == "plan":
+        return cmd_plan(args)
+    elif args.command == "profile":
+        return cmd_profile(args)
+    elif args.command == "holdings":
+        return cmd_holdings(args)
+    elif args.command == "portfolio":
+        return cmd_portfolio(args)
+    elif args.command == "advise":
+        return cmd_advise(args)
+    elif args.command == "db":
+        return cmd_db(args)
+    else:
+        parser.print_help()
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

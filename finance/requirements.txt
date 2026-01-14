@@ -1,0 +1,17 @@
+# Finance CLI dependencies
+pdfplumber>=0.10.0
+python-dateutil>=2.8
+colorama>=0.4.0
+tabulate>=0.9.0
+requests>=2.31.0
+yfinance>=0.2.0
+
+# Database dependencies
+psycopg2-binary>=2.9.0
+
+# MCP server dependencies
+mcp>=1.2.0
+
+# API server dependencies
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
