@@ -1,6 +1,6 @@
 # Portfolio Projections Feature Spec
 
-> **Status**: Phase 1 Complete (Backend Foundation)
+> **Status**: Phase 6 Complete (Polish)
 > **Target**: Coast FIRE calculation + interactive portfolio projections
 > **Approach**: Client-side calculation engine for instant interactivity
 
@@ -693,36 +693,38 @@ export interface ProjectionScenariosResponse {
 
 ### Phase 2
 
-- [ ] Compounding math matches manual calculation
-- [ ] Blended return calculation is correct
-- [ ] Coast FIRE target derived correctly from SWR
-- [ ] All unit tests pass
+- [x] Compounding math matches manual calculation
+- [x] Blended return calculation is correct
+- [x] Coast FIRE target derived correctly from SWR
+- [x] All unit tests pass (56 tests)
 
 ### Phase 3
 
-- [ ] Chart renders with combined historical + projected data
-- [ ] Coast FIRE card displays correct values
-- [ ] Navigation link appears in sidebar
+- [x] Chart renders with combined historical + projected data
+- [x] Coast FIRE card displays correct values
+- [x] Navigation link appears in sidebar
 
 ### Phase 4
 
-- [ ] Sliders update chart immediately (no loading state)
-- [ ] Allocation sliders sum to 100%
-- [ ] Reset button restores defaults
-- [ ] Milestone markers appear at correct positions
+- [x] Sliders update chart immediately (no loading state)
+- [x] Allocation sliders sum to 100%
+- [x] Reset button restores defaults
+- [x] Milestone markers appear at correct positions
+- [x] Goal deadline milestones on chart
+- [x] Unit tests for allocation adjustment (64 tests total)
 
 ### Phase 5
 
-- [ ] Scenarios save and load correctly
-- [ ] Primary scenario loads on page open
-- [ ] Comparison mode shows both projections
-- [ ] Cannot delete primary scenario
+- [x] Scenarios save and load correctly
+- [x] Primary scenario loads on page open
+- [x] Comparison mode shows both projections
+- [x] Cannot delete primary scenario (API enforces)
 
 ### Phase 6
 
-- [ ] Responsive layout works on tablet
-- [ ] Export produces valid PNG/CSV
-- [ ] Settings persist across sessions
+- [x] Responsive layout works on tablet
+- [x] Export produces valid PNG/CSV
+- [x] Settings persist across sessions
 
 ---
 

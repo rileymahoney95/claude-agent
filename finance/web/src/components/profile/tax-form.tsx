@@ -49,6 +49,7 @@ export function TaxForm({
   const [federalBracket, setFederalBracket] = useState("");
   const [stateTax, setStateTax] = useState("");
   const [rothMaxed, setRothMaxed] = useState(false);
+  const [backdoorRequired, setBackdoorRequired] = useState(false);
   const [has401k, setHas401k] = useState(false);
   const [hsaEligible, setHsaEligible] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +61,7 @@ export function TaxForm({
       setFederalBracket(taxSituation.federal_bracket?.toString() || "");
       setStateTax(taxSituation.state_tax?.toString() || "");
       setRothMaxed(taxSituation.roth_maxed ?? false);
+      setBackdoorRequired(taxSituation.backdoor_required ?? false);
       setHas401k(taxSituation.has_401k ?? false);
       setHsaEligible(taxSituation.hsa_eligible ?? false);
       setError(null);
@@ -89,6 +91,7 @@ export function TaxForm({
       federal_bracket: federalNum,
       state_tax: stateNum,
       roth_maxed: rothMaxed,
+      backdoor_required: backdoorRequired,
       has_401k: has401k,
       hsa_eligible: hsaEligible,
     });
@@ -176,6 +179,19 @@ export function TaxForm({
                 />
                 <Label htmlFor="rothMaxed" className="font-normal">
                   Roth IRA Maxed
+                </Label>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="backdoorRequired"
+                  checked={backdoorRequired}
+                  onCheckedChange={(checked) =>
+                    setBackdoorRequired(checked === true)
+                  }
+                />
+                <Label htmlFor="backdoorRequired" className="font-normal">
+                  Backdoor Roth Required
                 </Label>
               </div>
 

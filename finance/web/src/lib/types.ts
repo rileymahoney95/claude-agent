@@ -119,6 +119,7 @@ export interface TaxSituation {
   federal_bracket: number;
   state_tax: number;
   roth_maxed: boolean;
+  backdoor_required: boolean;
   has_401k: boolean;
   hsa_eligible: boolean;
 }

@@ -181,5 +181,5 @@ DEFAULT_PROJECTION_SETTINGS = {
     "inflation_rate": 3.0,        # Annual inflation %
     "withdrawal_rate": 4.0,       # Safe withdrawal rate for Coast FIRE
     "target_retirement_age": 65,  # Retirement target
-    "current_age": 32,            # User sets once
+    "current_age": 30,            # User sets once
 }

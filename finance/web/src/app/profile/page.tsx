@@ -11,7 +11,12 @@ import {
   GoalEditDialog,
   TaxForm,
   HouseholdForm,
+  ProjectionSettingsForm,
 } from '@/components/profile';
+import {
+  useProjectionSettings,
+  useUpdateProjectionSettings,
+} from '@/lib/hooks/use-projections';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import type {
   CashFlow,
@@ -38,13 +43,19 @@ const FILING_STATUS_LABELS: Record<string, string> = {
 
 export default function ProfilePage() {
   const { data: profile, isLoading, error, refetch } = useProfile();
+  const {
+    data: projectionSettings,
+    isLoading: projectionSettingsLoading,
+  } = useProjectionSettings();
   const updateSection = useUpdateProfileSection();
+  const updateProjectionSettings = useUpdateProjectionSettings();
 
   // Dialog states
   const [cashFlowOpen, setCashFlowOpen] = useState(false);
   const [taxOpen, setTaxOpen] = useState(false);
   const [householdOpen, setHouseholdOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
+  const [projectionSettingsOpen, setProjectionSettingsOpen] = useState(false);
   const [editingGoalType, setEditingGoalType] =
     useState<GoalType>('short_term');
 
@@ -98,6 +109,14 @@ export default function ProfilePage() {
         onSuccess: () => setHouseholdOpen(false),
       }
     );
+  };
+
+  const handleProjectionSettingsSave = (
+    data: Parameters<typeof updateProjectionSettings.mutate>[0]
+  ) => {
+    updateProjectionSettings.mutate(data, {
+      onSuccess: () => setProjectionSettingsOpen(false),
+    });
   };
 
   const openGoalDialog = (type: GoalType) => {
@@ -321,6 +340,12 @@ export default function ProfilePage() {
               <p className='font-medium'>{tax.roth_maxed ? 'Yes' : 'No'}</p>
             </div>
             <div>
+              <span className='text-muted-foreground'>Backdoor Roth</span>
+              <p className='font-medium'>
+                {tax.backdoor_required ? 'Required' : 'No'}
+              </p>
+            </div>
+            <div>
               <span className='text-muted-foreground'>401(k)</span>
               <p className='font-medium'>{tax.has_401k ? 'Yes' : 'No'}</p>
             </div>
@@ -329,6 +354,92 @@ export default function ProfilePage() {
               <p className='font-medium'>{tax.hsa_eligible ? 'Yes' : 'No'}</p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Projection Settings */}
+      <Card>
+        <CardHeader className='flex flex-row items-center justify-between'>
+          <CardTitle>Projection Settings</CardTitle>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => setProjectionSettingsOpen(true)}
+            disabled={projectionSettingsLoading}
+          >
+            Edit
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {projectionSettingsLoading ? (
+            <div className='grid grid-cols-2 md:grid-cols-3 gap-4 text-sm'>
+              {[...Array(6)].map((_, i) => (
+                <Skeleton key={i} className='h-10' />
+              ))}
+            </div>
+          ) : projectionSettings ? (
+            <div className='space-y-4'>
+              <div className='grid grid-cols-2 md:grid-cols-4 gap-4 text-sm'>
+                <div>
+                  <span className='text-muted-foreground'>Current Age</span>
+                  <p className='font-medium'>{projectionSettings.currentAge}</p>
+                </div>
+                <div>
+                  <span className='text-muted-foreground'>Retirement Age</span>
+                  <p className='font-medium'>
+                    {projectionSettings.targetRetirementAge}
+                  </p>
+                </div>
+                <div>
+                  <span className='text-muted-foreground'>Inflation Rate</span>
+                  <p className='font-medium'>
+                    {projectionSettings.inflationRate}%
+                  </p>
+                </div>
+                <div>
+                  <span className='text-muted-foreground'>Withdrawal Rate</span>
+                  <p className='font-medium'>
+                    {projectionSettings.withdrawalRate}%
+                  </p>
+                </div>
+              </div>
+              <div className='border-t pt-3'>
+                <span className='text-sm text-muted-foreground'>
+                  Expected Annual Returns
+                </span>
+                <div className='grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-2'>
+                  <div>
+                    <span className='text-muted-foreground'>Equities</span>
+                    <p className='font-medium'>
+                      {projectionSettings.expectedReturns?.equities ?? 0}%
+                    </p>
+                  </div>
+                  <div>
+                    <span className='text-muted-foreground'>Bonds</span>
+                    <p className='font-medium'>
+                      {projectionSettings.expectedReturns?.bonds ?? 0}%
+                    </p>
+                  </div>
+                  <div>
+                    <span className='text-muted-foreground'>Crypto</span>
+                    <p className='font-medium'>
+                      {projectionSettings.expectedReturns?.crypto ?? 0}%
+                    </p>
+                  </div>
+                  <div>
+                    <span className='text-muted-foreground'>Cash</span>
+                    <p className='font-medium'>
+                      {projectionSettings.expectedReturns?.cash ?? 0}%
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className='text-sm text-muted-foreground'>
+              No projection settings found
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -416,6 +527,14 @@ export default function ProfilePage() {
         household={household}
         onSave={handleHouseholdSave}
         isLoading={updateSection.isPending}
+      />
+
+      <ProjectionSettingsForm
+        open={projectionSettingsOpen}
+        onOpenChange={setProjectionSettingsOpen}
+        settings={projectionSettings ?? null}
+        onSave={handleProjectionSettingsSave}
+        isLoading={updateProjectionSettings.isPending}
       />
     </div>
   );

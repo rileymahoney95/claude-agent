@@ -378,3 +378,16 @@ The MCP server exposes these tools (all call CLI internally):
 - `get_holdings` / `set_holding` - Manual holdings management
 - `check_holdings_freshness` - Stale data warning (>7 days)
 - `get_financial_advice` - Prioritized recommendations with focus options (Phase 6)
+
+## Web Client
+
+Next.js 16 + React 19 web application in `web/`. See `web/CLAUDE.md` for detailed architecture and patterns.
+
+```bash
+cd web
+npm run dev        # Start dev server on port 3000
+npm run build      # Production build
+npm run test:run   # Run vitest once
+```
+
+Key features: Dashboard, holdings management, profile editor, financial advisor, portfolio projections with interactive controls and scenario management.
