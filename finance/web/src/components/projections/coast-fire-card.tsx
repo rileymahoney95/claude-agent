@@ -1,8 +1,10 @@
 'use client';
 
-import { CheckCircle, Clock, TrendingUp } from 'lucide-react';
+import Link from 'next/link';
+import { CheckCircle, Clock, TrendingUp, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Button } from '@/components/ui/button';
 import { formatCurrency } from '@/lib/utils';
 import type { CoastFireResult } from '@/lib/projection';
 
@@ -113,11 +115,23 @@ export function CoastFireCard({ coastFire, currentValue }: CoastFireCardProps) {
           </div>
         </div>
 
-        {/* Explanation */}
-        <p className="text-xs text-muted-foreground pt-1">
-          Coast FIRE: the amount you need today to reach your retirement target
-          with no additional contributions.
-        </p>
+        {/* Explanation and link */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-1 border-t">
+          <p className="text-xs text-muted-foreground">
+            Coast FIRE: the amount you need today to reach your retirement
+            target with no additional contributions.
+          </p>
+          <Button
+            variant="link"
+            size="sm"
+            asChild
+            className="p-0 h-auto text-xs justify-start sm:justify-end"
+          >
+            <Link href="/profile">
+              Edit Goals <ExternalLink className="h-3 w-3 ml-1" />
+            </Link>
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

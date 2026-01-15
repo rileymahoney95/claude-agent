@@ -22,6 +22,7 @@ import {
   type ProjectionSettings,
   type ProjectionInput,
 } from '@/lib/projection';
+import { adjustAllocation } from '@/lib/hooks/use-projection';
 
 // =============================================================================
 // COMPOUNDING MATH TESTS
@@ -626,5 +627,87 @@ describe('validateScenarioSettings', () => {
   it('accepts zero monthly contribution', () => {
     const settings = { monthlyContribution: 0 };
     expect(validateScenarioSettings(settings)).toBeNull();
+  });
+});
+
+// =============================================================================
+// ALLOCATION ADJUSTMENT TESTS
+// =============================================================================
+
+describe('adjustAllocation', () => {
+  it('maintains sum of 100% after adjustment', () => {
+    const current = { equities: 50, bonds: 20, crypto: 20, cash: 10 };
+    const result = adjustAllocation(current, 'equities', 60);
+
+    const total = Object.values(result).reduce((sum, v) => sum + v, 0);
+    expect(total).toBeCloseTo(100, 1);
+  });
+
+  it('proportionally reduces other allocations', () => {
+    const current = { equities: 50, bonds: 25, crypto: 25, cash: 0 };
+    const result = adjustAllocation(current, 'equities', 70);
+
+    // equities increased by 20, others should decrease proportionally
+    // bonds and crypto were equal, so they should decrease equally
+    expect(result.equities).toBe(70);
+    expect(result.bonds).toBeCloseTo(result.crypto, 1);
+    expect(result.bonds).toBeLessThan(25);
+  });
+
+  it('handles increasing to 100%', () => {
+    const current = { equities: 50, bonds: 25, crypto: 25, cash: 0 };
+    const result = adjustAllocation(current, 'equities', 100);
+
+    expect(result.equities).toBe(100);
+    expect(result.bonds).toBeCloseTo(0, 1);
+    expect(result.crypto).toBeCloseTo(0, 1);
+  });
+
+  it('handles decreasing from 100%', () => {
+    const current = { equities: 100, bonds: 0, crypto: 0, cash: 0 };
+    // Can't decrease equities if others are all 0 - they can't increase
+    const result = adjustAllocation(current, 'equities', 80);
+
+    // Should not change since others are 0
+    expect(result.equities).toBe(100);
+  });
+
+  it('handles no change', () => {
+    const current = { equities: 50, bonds: 20, crypto: 20, cash: 10 };
+    const result = adjustAllocation(current, 'equities', 50);
+
+    expect(result).toEqual(current);
+  });
+
+  it('clamps value to valid range', () => {
+    const current = { equities: 50, bonds: 20, crypto: 20, cash: 10 };
+
+    // Try to set negative
+    const result1 = adjustAllocation(current, 'equities', -10);
+    expect(result1.equities).toBeGreaterThanOrEqual(0);
+
+    // Try to set over 100
+    const result2 = adjustAllocation(current, 'equities', 110);
+    expect(result2.equities).toBeLessThanOrEqual(100);
+  });
+
+  it('handles small adjustments precisely', () => {
+    const current = { equities: 50, bonds: 20, crypto: 20, cash: 10 };
+    const result = adjustAllocation(current, 'equities', 51);
+
+    const total = Object.values(result).reduce((sum, v) => sum + v, 0);
+    expect(total).toBeCloseTo(100, 1);
+    expect(result.equities).toBe(51);
+  });
+
+  it('preserves zero allocations', () => {
+    const current = { equities: 60, bonds: 0, crypto: 30, cash: 10 };
+    const result = adjustAllocation(current, 'equities', 70);
+
+    // Bonds was 0, should stay 0
+    expect(result.bonds).toBe(0);
+    // Total should still be 100
+    const total = Object.values(result).reduce((sum, v) => sum + v, 0);
+    expect(total).toBeCloseTo(100, 1);
   });
 });

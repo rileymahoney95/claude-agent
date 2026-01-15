@@ -1,2 +1,10 @@
 export { ProjectionChart } from './projection-chart';
 export { CoastFireCard } from './coast-fire-card';
+export { TimeHorizonSlider } from './time-horizon-slider';
+export { ReturnSliders } from './return-sliders';
+export { AllocationSliders } from './allocation-sliders';
+export { ContributionInput } from './contribution-input';
+export { ScenarioSelector } from './scenario-selector';
+export { SaveScenarioDialog } from './save-scenario-dialog';
+export { GoalAlerts } from './goal-alerts';
+export { ExportButtons } from './export-buttons';

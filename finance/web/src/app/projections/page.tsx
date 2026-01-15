@@ -1,147 +1,75 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useState, useRef } from 'react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorCard } from '@/components/ui/error-card';
-import { usePortfolio } from '@/lib/hooks/use-portfolio';
-import { useProfile } from '@/lib/hooks/use-profile';
-import {
-  useProjectionHistory,
-  useProjectionSettings,
-} from '@/lib/hooks/use-projections';
 import { formatCurrency } from '@/lib/utils';
-import { calculateProjection, type ProjectionSettings } from '@/lib/projection';
-import { ProjectionChart, CoastFireCard } from '@/components/projections';
-import type { Portfolio, ProfileResponse } from '@/lib/types';
-
-// Default projection: 20 years (240 months)
-const DEFAULT_PROJECTION_MONTHS = 240;
-
-/**
- * Map portfolio categories to asset classes for the projection engine.
- */
-function mapPortfolioToAssetClasses(
-  portfolio: Portfolio
-): Record<string, number> {
-  const byCategory = portfolio.by_category;
-  return {
-    equities:
-      (byCategory?.retirement?.value ?? 0) +
-      (byCategory?.taxable_equities?.value ?? 0),
-    bonds: 0, // Not currently tracked
-    crypto: byCategory?.crypto?.value ?? 0,
-    cash: byCategory?.cash?.value ?? 0,
-  };
-}
-
-/**
- * Derive retirement target from long-term goal (annual spending / SWR).
- */
-function deriveRetirementTarget(
-  profile: ProfileResponse | undefined,
-  settings: ProjectionSettings
-): number {
-  const annualSpending = profile?.goals?.long_term?.target;
-  if (!annualSpending) return 1_500_000; // Default fallback ($60K / 4%)
-  return annualSpending / (settings.withdrawalRate / 100);
-}
-
-/**
- * Calculate monthly surplus from profile cash flow.
- */
-function getMonthlyContribution(profile: ProfileResponse | undefined): number {
-  if (!profile?.monthly_cash_flow) return 0;
-  const cf = profile.monthly_cash_flow;
-  // Surplus = income - expenses - contributions (already being invested)
-  // But for projection, we want how much is being invested
-  return (
-    (cf.crypto_contributions ?? 0) +
-    (cf.roth_contributions ?? 0) +
-    (cf.hsa_contributions ?? 0)
-  );
-}
+import { useProjection } from '@/lib/hooks/use-projection';
+import { useKeyboardShortcuts } from '@/lib/hooks/use-keyboard-shortcuts';
+import {
+  ProjectionChart,
+  CoastFireCard,
+  TimeHorizonSlider,
+  ReturnSliders,
+  AllocationSliders,
+  ContributionInput,
+  ScenarioSelector,
+  SaveScenarioDialog,
+  GoalAlerts,
+  ExportButtons,
+} from '@/components/projections';
 
 export default function ProjectionsPage() {
-  // Fetch all required data
   const {
-    data: portfolio,
-    isLoading: portfolioLoading,
-    error: portfolioError,
-    refetch: refetchPortfolio,
-  } = usePortfolio();
-  const {
-    data: profile,
-    isLoading: profileLoading,
-    error: profileError,
-    refetch: refetchProfile,
-  } = useProfile();
-  const {
-    data: settings,
-    isLoading: settingsLoading,
-    error: settingsError,
-    refetch: refetchSettings,
-  } = useProjectionSettings();
-  const {
-    data: history,
-    isLoading: historyLoading,
-    error: historyError,
-    refetch: refetchHistory,
-  } = useProjectionHistory(12);
+    projection,
+    chartData,
+    goals,
+    isLoading,
+    error,
+    settings,
+    currentAllocation,
+    defaultReturns,
+    defaultContribution,
+    effectiveReturns,
+    effectiveAllocation,
+    effectiveContribution,
+    controls,
+    reset,
+    refetch,
+    // Scenarios
+    scenarios,
+    activeScenarioId,
+    hasUnsavedChanges,
+    compareEnabled,
+    compareScenarioId,
+    comparisonProjection,
+    setCompareEnabled,
+    setCompareScenarioId,
+    loadScenario,
+    saveCurrentAsScenario,
+  } = useProjection();
 
-  // Combined loading and error states
-  const isLoading =
-    portfolioLoading || profileLoading || settingsLoading || historyLoading;
-  const error = portfolioError || profileError || settingsError || historyError;
+  // Save dialog state
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 
-  // Calculate projection (memoized)
-  const projection = useMemo(() => {
-    if (!portfolio || !settings) return null;
+  // Chart ref for export
+  const chartRef = useRef<HTMLDivElement>(null);
 
-    return calculateProjection({
-      currentPortfolio: {
-        totalValue: portfolio.total_value,
-        byAssetClass: mapPortfolioToAssetClasses(portfolio),
-      },
-      settings,
-      monthlyContribution: getMonthlyContribution(profile),
-      projectionMonths: DEFAULT_PROJECTION_MONTHS,
-      retirementTarget: deriveRetirementTarget(profile, settings),
-    });
-  }, [portfolio, settings, profile]);
-
-  // Combine historical and projected data points
-  const chartData = useMemo(() => {
-    if (!projection) return [];
-
-    // Mark projected data points
-    const projectedPoints = projection.dataPoints.map((point) => ({
-      ...point,
-      isHistorical: false,
-    }));
-
-    // If we have historical data, prepend it
-    if (history?.dataPoints && history.dataPoints.length > 0) {
-      const historicalPoints = history.dataPoints.map((point) => ({
-        date: point.date,
-        monthIndex: -1, // Historical data doesn't have month index
-        age: settings
-          ? settings.currentAge -
-            (new Date().getTime() - new Date(point.date).getTime()) /
-              (365.25 * 24 * 60 * 60 * 1000)
-          : 0,
-        totalValue: point.totalValue,
-        byAssetClass: point.byAssetClass,
-        inflationAdjustedValue: point.totalValue, // No adjustment for historical
-        isHistorical: true,
-      }));
-
-      // Merge historical with projection, avoiding duplicate for current month
-      return [...historicalPoints, ...projectedPoints.slice(1)];
-    }
-
-    return projectedPoints;
-  }, [history, projection, settings]);
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onReset: () => {
+      reset();
+      toast.success('Controls reset to defaults');
+    },
+    onShowHelp: () => {
+      toast.info('Keyboard Shortcuts', {
+        description: 'Press Escape to reset all controls',
+        duration: 3000,
+      });
+    },
+  });
 
   // Current date for header
   const currentDate = new Date().toLocaleDateString('en-US', {
@@ -150,6 +78,36 @@ export default function ProjectionsPage() {
     year: 'numeric',
   });
 
+  // Calculate projection years for display
+  const projectionYears = Math.round(controls.projectionMonths / 12);
+
+  // Handle return slider changes
+  const handleReturnChange = (assetClass: string, value: number) => {
+    const newOverrides = {
+      ...(controls.returnOverrides ?? effectiveReturns),
+      [assetClass]: value,
+    };
+    controls.setReturnOverrides(newOverrides);
+  };
+
+  const handleReturnReset = () => {
+    controls.setReturnOverrides(null);
+  };
+
+  // Handle allocation slider changes
+  const handleAllocationChange = (newAllocation: Record<string, number>) => {
+    controls.setAllocationOverrides(newAllocation);
+  };
+
+  // Handle lock toggle
+  const handleLockChange = (locked: boolean) => {
+    controls.setLockToCurrentAllocation(locked);
+    if (!locked && !controls.allocationOverrides) {
+      // Initialize overrides with current allocation when unlocking
+      controls.setAllocationOverrides({ ...currentAllocation });
+    }
+  };
+
   // Handle errors
   if (error) {
     return (
@@ -157,12 +115,7 @@ export default function ProjectionsPage() {
         <ErrorCard
           message="Failed to load projection data"
           error={error}
-          onRetry={() => {
-            refetchPortfolio();
-            refetchProfile();
-            refetchSettings();
-            refetchHistory();
-          }}
+          onRetry={refetch}
         />
       </div>
     );
@@ -171,19 +124,69 @@ export default function ProjectionsPage() {
   return (
     <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">
-            Portfolio Projections
-          </h1>
-          <p className="text-sm sm:text-base text-muted-foreground mt-1">
-            20-year projection with Coast FIRE analysis
-          </p>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold">
+              Portfolio Projections
+            </h1>
+            <p className="text-sm sm:text-base text-muted-foreground mt-1">
+              {projectionYears}-year projection with Coast FIRE analysis
+            </p>
+          </div>
+          <span className="text-xs sm:text-sm text-muted-foreground">
+            {currentDate}
+          </span>
         </div>
-        <span className="text-xs sm:text-sm text-muted-foreground">
-          {currentDate}
-        </span>
+
+        {/* Scenario controls */}
+        {!isLoading && (
+          <ScenarioSelector
+            scenarios={scenarios ?? []}
+            activeScenarioId={activeScenarioId}
+            compareScenarioId={compareScenarioId}
+            compareEnabled={compareEnabled}
+            hasUnsavedChanges={hasUnsavedChanges}
+            onSelect={(id) => {
+              if (id === null) {
+                reset();
+              } else {
+                const scenario = scenarios?.find((s) => s.id === id);
+                if (scenario) {
+                  loadScenario(scenario);
+                }
+              }
+            }}
+            onCompareSelect={setCompareScenarioId}
+            onCompareToggle={setCompareEnabled}
+            onSaveClick={() => setSaveDialogOpen(true)}
+            isLoading={isLoading}
+          />
+        )}
       </div>
+
+      {/* Goal Alerts */}
+      {!isLoading && projection && (
+        <GoalAlerts
+          goals={goals}
+          coastFire={projection.coastFire}
+          settings={settings}
+        />
+      )}
+
+      {/* Save Scenario Dialog */}
+      <SaveScenarioDialog
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        currentSettings={{
+          projectionMonths: controls.projectionMonths,
+          returnOverrides: controls.returnOverrides ?? undefined,
+          allocationOverrides: controls.allocationOverrides ?? undefined,
+          monthlyContribution: controls.monthlyContribution ?? undefined,
+        }}
+        existingNames={scenarios?.map((s) => s.name) ?? []}
+        onSave={saveCurrentAsScenario}
+      />
 
       {/* Chart - Full Width */}
       {isLoading ? (
@@ -192,13 +195,25 @@ export default function ProjectionsPage() {
             <Skeleton className="h-6 w-40" />
           </CardHeader>
           <CardContent>
-            <Skeleton className="h-[350px] w-full" />
+            <Skeleton className="h-[250px] sm:h-[300px] lg:h-[350px] w-full" />
           </CardContent>
         </Card>
       ) : (
         <ProjectionChart
+          ref={chartRef}
           dataPoints={chartData}
           milestones={projection?.milestones ?? []}
+          showInflationAdjusted={controls.showInflationAdjusted}
+          goals={goals}
+          currentAge={settings?.currentAge}
+          comparisonData={compareEnabled ? comparisonProjection?.dataPoints : undefined}
+          comparisonLabel={scenarios?.find((s) => s.id === compareScenarioId)?.name}
+          exportSlot={
+            <ExportButtons
+              chartRef={chartRef}
+              dataPoints={projection?.dataPoints ?? []}
+            />
+          }
         />
       )}
 
@@ -223,7 +238,7 @@ export default function ProjectionsPage() {
         ) : projection ? (
           <CoastFireCard
             coastFire={projection.coastFire}
-            currentValue={portfolio?.total_value ?? 0}
+            currentValue={projection.dataPoints[0]?.totalValue ?? 0}
           />
         ) : null}
 
@@ -257,12 +272,12 @@ export default function ProjectionsPage() {
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Current Portfolio</span>
                   <span className="font-medium">
-                    {formatCurrency(portfolio?.total_value ?? 0)}
+                    {formatCurrency(projection?.dataPoints[0]?.totalValue ?? 0)}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Projected Value (20 years)
+                    Projected Value ({projectionYears} years)
                   </span>
                   <span className="font-medium">
                     {formatCurrency(projection?.finalValue ?? 0)}
@@ -281,7 +296,7 @@ export default function ProjectionsPage() {
                     Monthly Contribution
                   </span>
                   <span className="font-medium">
-                    {formatCurrency(getMonthlyContribution(profile))}
+                    {formatCurrency(effectiveContribution)}
                   </span>
                 </div>
                 {settings && (
@@ -300,41 +315,51 @@ export default function ProjectionsPage() {
         </Card>
       </div>
 
-      {/* Settings Info */}
-      {!isLoading && settings && (
+      {/* Projection Controls */}
+      {!isLoading && settings && defaultReturns && (
         <Card>
-          <CardHeader>
-            <CardTitle>Assumptions</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+            <CardTitle>Projection Controls</CardTitle>
+            <button
+              onClick={reset}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Reset all
+            </button>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">
-                  Equities Return
-                </div>
-                <div className="text-sm font-medium">
-                  {settings.expectedReturns.equities}% / year
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Crypto Return</div>
-                <div className="text-sm font-medium">
-                  {settings.expectedReturns.crypto}% / year
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Cash Return</div>
-                <div className="text-sm font-medium">
-                  {settings.expectedReturns.cash}% / year
-                </div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Inflation Rate</div>
-                <div className="text-sm font-medium">
-                  {settings.inflationRate}% / year
-                </div>
-              </div>
+          <CardContent className="space-y-8">
+            {/* Time Horizon and Contribution - Side by side on larger screens */}
+            <div className="grid gap-6 sm:grid-cols-2">
+              <TimeHorizonSlider
+                value={controls.projectionMonths}
+                onChange={controls.setProjectionMonths}
+                currentAge={settings.currentAge}
+                showInflationAdjusted={controls.showInflationAdjusted}
+                onInflationToggle={controls.setShowInflationAdjusted}
+              />
+              <ContributionInput
+                value={controls.monthlyContribution}
+                defaultValue={defaultContribution}
+                onChange={controls.setMonthlyContribution}
+              />
             </div>
+
+            {/* Expected Returns */}
+            <ReturnSliders
+              values={controls.returnOverrides ?? effectiveReturns}
+              defaults={defaultReturns}
+              onChange={handleReturnChange}
+              onReset={handleReturnReset}
+            />
+
+            {/* Allocation */}
+            <AllocationSliders
+              values={controls.allocationOverrides ?? effectiveAllocation}
+              currentAllocation={currentAllocation}
+              locked={controls.lockToCurrentAllocation}
+              onChange={handleAllocationChange}
+              onLockChange={handleLockChange}
+            />
           </CardContent>
         </Card>
       )}

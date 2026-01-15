@@ -1,8 +1,10 @@
 'use client';
 
+import { forwardRef } from 'react';
 import {
   ComposedChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -13,11 +15,22 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency } from '@/lib/utils';
 import type { ProjectionPoint, Milestone } from '@/lib/projection';
+import type { Goals } from '@/lib/types';
 
 interface ProjectionChartProps {
   dataPoints: ProjectionPoint[];
   milestones: Milestone[];
   showInflationAdjusted?: boolean;
+  /** Optional goals for deadline milestones */
+  goals?: Goals;
+  /** Current age for calculating goal milestone ages */
+  currentAge?: number;
+  /** Optional comparison projection data */
+  comparisonData?: ProjectionPoint[];
+  /** Label for comparison line */
+  comparisonLabel?: string;
+  /** Optional slot for export buttons in header */
+  exportSlot?: React.ReactNode;
 }
 
 // Asset class colors (CSS variables for theming)
@@ -59,6 +72,7 @@ interface ChartDataPoint {
   bonds: number;
   crypto: number;
   cash: number;
+  comparisonTotal?: number;
 }
 
 function transformData(
@@ -91,9 +105,10 @@ interface CustomTooltipProps {
   active?: boolean;
   payload?: TooltipPayload[];
   label?: string | number;
+  comparisonLabel?: string;
 }
 
-function CustomTooltip({ active, payload }: CustomTooltipProps) {
+function CustomTooltip({ active, payload, comparisonLabel }: CustomTooltipProps) {
   if (!active || !payload || !payload.length) return null;
 
   const data = payload[0].payload;
@@ -112,6 +127,16 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
             {formatCurrency(data.totalValue)}
           </span>
         </div>
+        {data.comparisonTotal !== undefined && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">
+              {comparisonLabel || 'Comparison'}
+            </span>
+            <span className="font-medium">
+              {formatCurrency(data.comparisonTotal)}
+            </span>
+          </div>
+        )}
         <div className="border-t pt-1.5 space-y-1">
           {assetClasses.map((assetClass) => {
             const value = data[assetClass];
@@ -137,28 +162,82 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
   );
 }
 
-export function ProjectionChart({
-  dataPoints,
-  milestones,
-  showInflationAdjusted = false,
-}: ProjectionChartProps) {
-  if (!dataPoints || dataPoints.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Portfolio Projection</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-center py-8">
-            No projection data available
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
+// Goal milestone colors (CSS classes for theming)
+const GOAL_COLORS: Record<string, string> = {
+  short_term: 'hsl(var(--chart-5))',    // amber/warning
+  medium_term: 'hsl(var(--chart-2))',   // blue/info
+  long_term: 'hsl(var(--chart-1))',     // green/success
+};
+
+const GOAL_LABELS: Record<string, string> = {
+  short_term: 'Short-term',
+  medium_term: 'Medium-term',
+  long_term: 'Long-term',
+};
+
+/**
+ * Calculate age at a goal deadline.
+ */
+function calculateAgeAtDeadline(
+  deadline: string,
+  currentAge: number
+): number | null {
+  const deadlineDate = new Date(deadline);
+  const today = new Date();
+
+  // If deadline is in the past, skip
+  if (deadlineDate <= today) return null;
+
+  const yearsUntil =
+    (deadlineDate.getTime() - today.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+  return currentAge + yearsUntil;
+}
+
+export const ProjectionChart = forwardRef<HTMLDivElement, ProjectionChartProps>(
+  function ProjectionChart(
+    {
+      dataPoints,
+      milestones,
+      showInflationAdjusted = false,
+      goals,
+      currentAge,
+      comparisonData,
+      comparisonLabel,
+      exportSlot,
+    },
+    ref
+  ) {
+    if (!dataPoints || dataPoints.length === 0) {
+      return (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Portfolio Projection</CardTitle>
+            {exportSlot}
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-center py-8">
+              No projection data available
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
 
   const sampledData = sampleDataPoints(dataPoints);
-  const chartData = transformData(sampledData, showInflationAdjusted);
+  const baseChartData = transformData(sampledData, showInflationAdjusted);
+
+  // If we have comparison data, transform and merge it
+  let chartData = baseChartData;
+  if (comparisonData && comparisonData.length > 0) {
+    const sampledComparison = sampleDataPoints(comparisonData);
+    const comparisonChartData = transformData(sampledComparison, showInflationAdjusted);
+
+    // Merge comparison total into main chart data
+    chartData = baseChartData.map((point, i) => ({
+      ...point,
+      comparisonTotal: comparisonChartData[i]?.totalValue,
+    }));
+  }
 
   // Find Coast FIRE and retirement milestones for reference lines
   const coastFireMilestone = milestones.find((m) => m.type === 'coast_fire');
@@ -169,9 +248,33 @@ export function ProjectionChart({
   const minAge = Math.min(...ages);
   const maxAge = Math.max(...ages);
 
+  // Calculate goal milestone ages (only if within chart range)
+  const goalMilestones: Array<{
+    type: string;
+    age: number;
+    label: string;
+    color: string;
+  }> = [];
+
+  if (goals && currentAge) {
+    for (const [goalType, goal] of Object.entries(goals)) {
+      if (goal.deadline) {
+        const ageAtDeadline = calculateAgeAtDeadline(goal.deadline, currentAge);
+        if (ageAtDeadline !== null && ageAtDeadline >= minAge && ageAtDeadline <= maxAge) {
+          goalMilestones.push({
+            type: goalType,
+            age: Math.round(ageAtDeadline * 10) / 10,
+            label: GOAL_LABELS[goalType] || goalType,
+            color: GOAL_COLORS[goalType] || 'var(--muted-foreground)',
+          });
+        }
+      }
+    }
+  }
+
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle>
           Portfolio Projection
           {showInflationAdjusted && (
@@ -180,9 +283,10 @@ export function ProjectionChart({
             </span>
           )}
         </CardTitle>
+        {exportSlot}
       </CardHeader>
       <CardContent>
-        <div className="h-[350px] w-full">
+        <div ref={ref} className="h-[250px] sm:h-[300px] lg:h-[350px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={chartData}
@@ -235,7 +339,9 @@ export function ProjectionChart({
                 width={60}
               />
 
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip
+                content={<CustomTooltip comparisonLabel={comparisonLabel} />}
+              />
 
               {/* Reference line for Coast FIRE */}
               {coastFireMilestone && (
@@ -268,6 +374,23 @@ export function ProjectionChart({
                   }}
                 />
               )}
+
+              {/* Goal deadline milestones */}
+              {goalMilestones.map((goal) => (
+                <ReferenceLine
+                  key={goal.type}
+                  x={goal.age}
+                  stroke={goal.color}
+                  strokeDasharray="8 4"
+                  strokeWidth={1}
+                  label={{
+                    value: goal.label,
+                    position: 'insideTopRight',
+                    fontSize: 10,
+                    fill: goal.color,
+                  }}
+                />
+              ))}
 
               {/* Stacked areas for asset classes */}
               <Area
@@ -303,6 +426,20 @@ export function ProjectionChart({
                 strokeWidth={1}
               />
 
+              {/* Comparison line overlay */}
+              {comparisonData && comparisonData.length > 0 && (
+                <Line
+                  type="monotone"
+                  dataKey="comparisonTotal"
+                  stroke="var(--muted-foreground)"
+                  strokeDasharray="5 5"
+                  strokeWidth={2}
+                  dot={false}
+                  name={comparisonLabel || 'Comparison'}
+                  legendType="line"
+                />
+              )}
+
               <Legend
                 verticalAlign="bottom"
                 height={36}
@@ -316,4 +453,4 @@ export function ProjectionChart({
       </CardContent>
     </Card>
   );
-}
+});
