@@ -124,7 +124,7 @@ finance/
 ### Data Flow
 
 1. **Statement Parsing**: PDF → `classifier.py` detects type → `sofi_apex.py` or `chase_cc.py` extracts text with pdfplumber → structured dict
-2. **Snapshots**: Brokerage data saved to `.data/finance/snapshots/{date}_{account_type}.json`
+2. **Snapshots**: Brokerage data saved to `.data/snapshots/{date}_{account_type}.json`
 3. **CC Transactions**: Credit card data saved to SQLite (`cc_statements`, `cc_transactions` tables)
 4. **Template Updates**: Asset values injected into markdown table cells via regex
 5. **Planning Prompts**: Template populated with latest snapshots + profile + holdings → clipboard
@@ -133,12 +133,12 @@ finance/
 
 **Config paths** (`config.py`):
 
-- `REPO_ROOT`: Three levels up from config.py
-- `SNAPSHOTS_DIR`: `.data/finance/snapshots/`
-- `DATABASE_PATH`: `.data/finance/finance.db`
-- `PROFILE_PATH`: `.config/finance-profile.json`
+- `REPO_ROOT`: Two levels up from config.py (repo root)
+- `SNAPSHOTS_DIR`: `.data/snapshots/`
+- `DATABASE_PATH`: `.data/finance.db`
+- `PROFILE_PATH`: `.config/profile.json`
 - `HOLDINGS_PATH`: `.config/holdings.json`
-- `STATEMENTS_DIR`: `personal/finance/statements/`
+- `STATEMENTS_DIR`: `personal/statements/`
 
 **MCP server bridges to CLI**: All MCP tools call the CLI with `--json` flag via subprocess, parsing JSON output.
 
@@ -473,7 +473,7 @@ FastAPI REST server wrapping CLI modules for the web UI. All endpoints return JS
 
 SQLite database for persistence - no Docker required. Database file is created automatically on first use.
 
-**Database Path:** `.data/finance/finance.db`
+**Database Path:** `.data/finance.db`
 
 ### Setup
 

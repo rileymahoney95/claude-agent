@@ -15,15 +15,9 @@ logger = logging.getLogger("finance-api")
 # Load .env file if it exists (for ANTHROPIC_API_KEY and other env vars)
 try:
     from dotenv import load_dotenv
-    # Load from repo root or finance directory
-    env_paths = [
-        Path(__file__).resolve().parent.parent.parent / ".env",
-        Path(__file__).resolve().parent.parent / ".env",
-    ]
-    for env_path in env_paths:
-        if env_path.exists():
-            load_dotenv(env_path)
-            break
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
 except ImportError:
     pass  # python-dotenv not installed, skip
 

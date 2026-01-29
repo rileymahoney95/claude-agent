@@ -16,7 +16,7 @@
    
    Option A: Create a `.env` file in the repo root:
    ```bash
-   # In /Users/rileymahoney/Documents/Projects/claude-agent/.env
+   # In the finance repo root
    ANTHROPIC_API_KEY=your-api-key-here
    ```
    
@@ -109,11 +109,11 @@ finance portfolio               # Now reads from JSON files only
 
 | File                           | Purpose                               |
 | ------------------------------ | ------------------------------------- |
-| `.data/finance/finance.db`     | SQLite database (primary storage)     |
-| `.data/finance/snapshots/`     | Historical statement snapshots (backup)|
-| `.config/finance-profile.json` | Your financial profile                |
+| `.data/finance.db`             | SQLite database (primary storage)     |
+| `.data/snapshots/`             | Historical statement snapshots (backup)|
+| `.config/profile.json`         | Your financial profile                |
 | `.config/holdings.json`        | Manual holdings (crypto, bank, other) |
-| `personal/finance/statements/` | Archived statement PDFs               |
+| `personal/statements/`         | Archived statement PDFs               |
 | `.env`                         | Environment variables (gitignored)    |
 
 ## Options
@@ -163,6 +163,6 @@ Ctrl+C detaches from logs but keeps services running. Use `finance-dev --stop` t
 
 ## Other Interfaces
 
-- **API Server**: `finance-api` starts REST API on port 8000. See `finance/api/USAGE.md`
-- **Web UI**: Next.js app in `finance/web/` (run `npm run dev` in that directory)
+- **API Server**: `finance-api` starts REST API on port 8000. See `api/USAGE.md`
+- **Web UI**: Next.js app in `web/` (run `npm run dev` in that directory)
 - **MCP Server**: Available via `finance` MCP server (see CLAUDE.md for tools)

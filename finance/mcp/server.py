@@ -54,7 +54,7 @@ async def parse_statement(
     Parse a brokerage statement PDF and save a snapshot.
 
     Args:
-        filename: Name of the PDF file in personal/finance/statements/
+        filename: Name of the PDF file in personal/statements/
         no_update: If True, don't update the planning template
 
     Returns:

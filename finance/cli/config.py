@@ -8,27 +8,21 @@ from pathlib import Path
 # Load .env file if it exists (for ANTHROPIC_API_KEY and other env vars)
 try:
     from dotenv import load_dotenv
-    # Load from repo root or finance directory
-    env_paths = [
-        Path(__file__).resolve().parent.parent.parent / ".env",
-        Path(__file__).resolve().parent.parent / ".env",
-    ]
-    for env_path in env_paths:
-        if env_path.exists():
-            load_dotenv(env_path)
-            break
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
 except ImportError:
     pass  # python-dotenv not installed, skip
 
 # Paths relative to repository root
-# finance/cli/config.py -> cli -> finance -> repo root
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = REPO_ROOT / ".data" / "finance"
+# cli/config.py -> cli -> repo root
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = REPO_ROOT / ".data"
 SNAPSHOTS_DIR = DATA_DIR / "snapshots"
-TEMPLATE_PATH = REPO_ROOT / "finance" / "templates" / "FINANCIAL_PLANNING_PROMPT.md"
-STATEMENTS_DIR = REPO_ROOT / "personal" / "finance" / "statements"
+TEMPLATE_PATH = REPO_ROOT / "templates" / "FINANCIAL_PLANNING_PROMPT.md"
+STATEMENTS_DIR = REPO_ROOT / "personal" / "statements"
 LOCK_FILE = DATA_DIR / ".lock"
-PROFILE_PATH = REPO_ROOT / ".config" / "finance-profile.json"
+PROFILE_PATH = REPO_ROOT / ".config" / "profile.json"
 HOLDINGS_PATH = REPO_ROOT / ".config" / "holdings.json"
 AI_MODELS_PATH = REPO_ROOT / ".config" / "ai-models.json"
 

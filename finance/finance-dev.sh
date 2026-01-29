@@ -30,7 +30,7 @@ WEB_PORT=3000
 PID_DIR="$SCRIPT_DIR/.pids"
 
 # Database location
-DB_PATH="$SCRIPT_DIR/../.data/finance/finance.db"
+DB_PATH="$SCRIPT_DIR/.data/finance.db"
 
 log_info() { echo -e "${GREEN}✓${NC} $1"; }
 log_warn() { echo -e "${YELLOW}⚠${NC} $1"; }
@@ -181,7 +181,7 @@ start() {
   echo "  📊 Web App:    http://localhost:$WEB_PORT"
   echo "  🔌 API:        http://localhost:$API_PORT"
   echo "  📚 API Docs:   http://localhost:$API_PORT/docs"
-  echo "  🗄️  Database:   SQLite at .data/finance/finance.db"
+  echo "  🗄️  Database:   SQLite at .data/finance.db"
   echo ""
   echo "  📋 Logs:       finance-dev --logs"
   echo "  🛑 Stop:       finance-dev --stop"
@@ -239,7 +239,7 @@ case "${1:-}" in
     echo "  --status      Show status of all services"
     echo "  --help, -h    Show this help"
     echo ""
-    echo "Database: Uses SQLite at .data/finance/finance.db (no Docker required)"
+    echo "Database: Uses SQLite at .data/finance.db (no Docker required)"
     ;;
   "")
     start

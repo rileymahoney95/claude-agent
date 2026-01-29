@@ -14,7 +14,7 @@ finance-api --reload  # Dev mode with auto-reload
 finance-api --port 3001  # Custom port
 ```
 
-Database: Uses SQLite at `.data/finance/finance.db` (no setup required).
+Database: Uses SQLite at `.data/finance.db` (no setup required).
 
 ## Endpoints
 

@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
       echo "  finance-api --reload         # Start with auto-reload"
       echo "  finance-api --port 3001      # Start on port 3001"
       echo ""
-      echo "Database: Uses SQLite at .data/finance/finance.db (no setup required)"
+      echo "Database: Uses SQLite at .data/finance.db (no setup required)"
       exit 0
       ;;
     *)

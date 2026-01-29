@@ -142,7 +142,7 @@ def prompt_for_profile(profile: dict) -> dict:
     """Interactively prompt for all profile sections."""
     print()
     print(format_header("Financial Profile Setup"))
-    print(f"{Style.DIM}This saves to .config/finance-profile.json for future sessions{Style.RESET_ALL}")
+    print(f"{Style.DIM}This saves to .config/profile.json for future sessions{Style.RESET_ALL}")
     print(f"{Style.DIM}Press Enter to keep current value or skip{Style.RESET_ALL}")
 
     # Monthly Cash Flow

@@ -16,7 +16,7 @@ Usage:
     finance advise [--focus <area>] [--json]
     finance db [status|migrate|export|reset] [--json]
 
-Database: Uses SQLite at .data/finance/finance.db (no Docker required)
+Database: Uses SQLite at .data/finance.db (no Docker required)
 """
 
 import argparse

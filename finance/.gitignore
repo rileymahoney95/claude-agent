@@ -1,0 +1,36 @@
+# Runtime data
+.data/
+.logs/
+.pids/
+*.log
+
+# Configuration (contains personal/sensitive data)
+.config/
+
+# Environment and secrets
+.env
+.env.local
+*.key
+*.pem
+
+# Personal data (statements, etc.)
+personal/
+
+# Auto-generated templates with real data
+templates/PLANNING_SESSION.md
+templates/ADVISOR_SESSION.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Node modules
+node_modules/
