@@ -295,3 +295,30 @@ export type ProfileSection =
   | 'household_context'
   | 'tax_situation'
   | 'goals';
+
+// =============================================================================
+// SESSION API TYPES
+// =============================================================================
+
+export interface SessionRecommendations {
+  high: Recommendation[];
+  medium: Recommendation[];
+  low: Recommendation[];
+}
+
+export interface SessionData {
+  portfolio_summary: PortfolioSummary;
+  goal_status: GoalDetail[];
+  recommendations: SessionRecommendations;
+  data_freshness: DataFreshness;
+  generated_at: string;
+}
+
+export interface SessionResponse {
+  success: boolean;
+  prompt?: string;
+  data?: SessionData;
+  error?: string;
+}
+
+export type SessionFormat = 'json' | 'markdown';

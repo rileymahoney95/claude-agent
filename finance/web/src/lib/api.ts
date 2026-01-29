@@ -22,6 +22,8 @@ import type {
   ProjectionScenariosResponse,
   ProjectionScenarioResponse,
   ScenarioSettingsAPI,
+  SessionResponse,
+  SessionFormat,
 } from './types';
 
 const API_URL =
@@ -417,4 +419,39 @@ export async function deleteProjectionScenario(
     throw new Error(error.detail || response.statusText);
   }
   return response.json();
+}
+
+// ============================================================================
+// Session
+// ============================================================================
+
+/**
+ * Generate an advisor session prompt.
+ * @param format - 'json' for structured data, 'markdown' for raw prompt
+ */
+export async function getSession(
+  format: SessionFormat = 'json'
+): Promise<SessionResponse | string> {
+  const params = new URLSearchParams({ format });
+  const response = await fetch(`${API_URL}/session?${params}`);
+
+  if (!response.ok) {
+    throw new Error(`Failed to generate session: ${response.statusText}`);
+  }
+
+  // For markdown format, return the raw text
+  if (format === 'markdown') {
+    return response.text();
+  }
+
+  return response.json();
+}
+
+/**
+ * Get session prompt as markdown string (convenience function).
+ * Returns the raw markdown prompt text for clipboard copy.
+ */
+export async function getSessionMarkdown(): Promise<string> {
+  const result = await getSession('markdown');
+  return typeof result === 'string' ? result : (result.prompt ?? '');
 }

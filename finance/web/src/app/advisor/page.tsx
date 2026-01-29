@@ -10,6 +10,7 @@ import {
   PriorityFilter,
   RecommendationList,
   WhatIfCalculator,
+  ExportSessionButton,
   type FilterOption,
 } from "@/components/advisor";
 
@@ -51,7 +52,10 @@ export default function AdvisorPage() {
             Prioritized recommendations and what-if calculator
           </p>
         </div>
-        <span className="text-xs sm:text-sm text-muted-foreground">{currentDate}</span>
+        <div className="flex items-center gap-3">
+          <ExportSessionButton />
+          <span className="text-xs sm:text-sm text-muted-foreground">{currentDate}</span>
+        </div>
       </div>
 
       {/* Summary Stats */}

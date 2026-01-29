@@ -32,6 +32,7 @@ from commands import (
     cmd_history,
     cmd_summary,
     cmd_plan,
+    cmd_plan_advisor,
     cmd_profile,
     cmd_holdings,
     cmd_portfolio,
@@ -74,8 +75,10 @@ def main():
 
     # plan command
     plan_parser = subparsers.add_parser("plan", help="Generate populated planning prompt")
+    plan_parser.add_argument("--advisor", action="store_true",
+                             help="Generate advisor session with recommendations (default: planning template)")
     plan_parser.add_argument("--no-save", action="store_true",
-                             help="Don't save to PLANNING_SESSION.md (default: save)")
+                             help="Don't save to file (default: save)")
     plan_parser.add_argument("--no-copy", action="store_true",
                              help="Don't copy to clipboard (default: copy)")
     plan_parser.add_argument("--json", action="store_true", help="Output as JSON only")
@@ -150,6 +153,8 @@ def main():
     elif args.command == "pull":
         return cmd_pull(args)
     elif args.command == "plan":
+        if getattr(args, 'advisor', False):
+            return cmd_plan_advisor(args)
         return cmd_plan(args)
     elif args.command == "profile":
         return cmd_profile(args)

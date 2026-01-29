@@ -290,7 +290,7 @@ export const ProjectionChart = forwardRef<HTMLDivElement, ProjectionChartProps>(
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={chartData}
-              margin={{ top: 10, right: 10, left: 10, bottom: 0 }}
+              margin={{ top: 40, right: 10, left: 10, bottom: 0 }}
             >
               <defs>
                 {/* Gradients for softer projection appearance */}
@@ -353,6 +353,7 @@ export const ProjectionChart = forwardRef<HTMLDivElement, ProjectionChartProps>(
                   label={{
                     value: 'Coast FIRE',
                     position: 'top',
+                    offset: 5,
                     fontSize: 11,
                     fill: 'var(--muted-foreground)',
                   }}
@@ -369,6 +370,7 @@ export const ProjectionChart = forwardRef<HTMLDivElement, ProjectionChartProps>(
                   label={{
                     value: 'Retirement',
                     position: 'top',
+                    offset: 5,
                     fontSize: 11,
                     fill: 'var(--muted-foreground)',
                   }}

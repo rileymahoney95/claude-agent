@@ -43,6 +43,7 @@ finance holdings set bank.hysa 12000 # Set bank balance
 finance profile                     # View profile
 finance profile --edit              # Edit profile interactively
 finance plan                        # Generate planning prompt (clipboard + file)
+finance plan --advisor              # Generate advisor session with recommendations
 finance advise                      # Get prioritized financial recommendations
 finance advise --focus goals        # Focus on goal-related recommendations
 finance advise --focus rebalance    # Focus on allocation/rebalancing
@@ -68,6 +69,7 @@ finance/
 │   ├── analyzer.py     # Goal/allocation analysis + market context (Phase 3)
 │   ├── advisor.py      # Recommendation engine with priority logic (Phase 4)
 │   ├── projections.py  # Projection settings, history, asset class mapping (Phase 5)
+│   ├── session.py      # Advisor session prompt generation (Phase 6)
 │   ├── parsers/
 │   │   └── sofi_apex.py  # PDF parsing for SoFi/Apex statements
 │   ├── snapshots.py    # Save/load snapshots (JSON or database)
@@ -83,12 +85,15 @@ finance/
 │       ├── profile.py      # GET/PUT/PATCH /api/v1/profile
 │       ├── advice.py       # GET /api/v1/advice
 │       ├── statements.py   # GET/POST /api/v1/statements
-│       └── projections.py  # Projection history, settings, scenarios (Phase 5)
+│       ├── projections.py  # Projection history, settings, scenarios (Phase 5)
+│       └── session.py      # GET /api/v1/session (advisor session prompts)
 ├── mcp/
 │   └── server.py       # FastMCP server wrapping CLI via subprocess
 ├── templates/
-│   ├── FINANCIAL_PLANNING_PROMPT.md  # Template (auto-updated)
-│   └── PLANNING_SESSION.md           # Generated output
+│   ├── FINANCIAL_PLANNING_PROMPT.md  # Planning template (auto-updated)
+│   ├── PLANNING_SESSION.md           # Generated planning output
+│   ├── ADVISOR_SESSION_PROMPT.md     # Advisor session template reference
+│   └── ADVISOR_SESSION.md            # Generated advisor session output
 ├── finance.sh          # CLI wrapper script
 ├── finance-api.sh      # API server wrapper script
 ├── schema_sqlite.sql   # SQLite database schema
@@ -278,6 +283,50 @@ DEFAULT_PROJECTION_SETTINGS = {
 }
 ```
 
+### Session Module (Phase 6)
+
+`session.py` generates comprehensive advisor session prompts combining portfolio data, goals, and recommendations:
+
+**Key Function** (`generate_session_prompt`):
+
+```python
+from session import generate_session_prompt
+
+result = generate_session_prompt()
+# Returns: {
+#   success: True,
+#   prompt: "# Financial Advisor Session\n...",  # Full markdown prompt
+#   data: {
+#     portfolio_summary: {...},
+#     goal_status: [...],
+#     recommendations: { high: [...], medium: [...], low: [...] },
+#     data_freshness: {...},
+#     generated_at: "2026-01-19T..."
+#   }
+# }
+```
+
+**Prompt Sections**:
+
+1. **Header** - Generated date
+2. **Advisor Context** - Role, philosophy, constraints, communication preferences
+3. **Portfolio Snapshot** - Total value, monthly surplus, allocation table
+4. **Goal Status** - Each goal with progress, deadline, required pace, status
+5. **Recommendations** - Grouped by priority (high/medium/low) with rationale
+6. **Action Checklist** - Derived from high-priority recommendations
+7. **Questions Section** - Placeholder for user input
+8. **Data Freshness** - Source dates and staleness warnings
+
+**CLI Usage**:
+
+```bash
+finance plan --advisor              # Save to ADVISOR_SESSION.md + copy to clipboard
+finance plan --advisor --no-copy    # Only save file
+finance plan --advisor --json       # Output structured JSON
+```
+
+**Web UI**: Export Session button on advisor page copies markdown to clipboard.
+
 ## API Server
 
 FastAPI REST server wrapping CLI modules for the web UI. All endpoints return JSON.
@@ -305,6 +354,7 @@ FastAPI REST server wrapping CLI modules for the web UI. All endpoints return JS
 | POST | `/projection/scenarios` | Create scenario (`{name, settings, is_primary}`) |
 | PATCH | `/projection/scenarios/{id}` | Update scenario |
 | DELETE | `/projection/scenarios/{id}` | Delete scenario (cannot delete primary) |
+| GET | `/session` | Generate advisor session prompt (`?format=json\|markdown`) |
 
 **OpenAPI docs:** `http://localhost:8000/docs`
 
@@ -390,4 +440,4 @@ npm run build      # Production build
 npm run test:run   # Run vitest once
 ```
 
-Key features: Dashboard, holdings management, profile editor, financial advisor, portfolio projections with interactive controls and scenario management.
+Key features: Dashboard, holdings management, profile editor, financial advisor with session export, portfolio projections with interactive controls and scenario management.

@@ -61,7 +61,7 @@ app.add_middleware(
 )
 
 # Include routers
-from routes import portfolio, holdings, profile, advice, statements, projections
+from routes import portfolio, holdings, profile, advice, statements, projections, session
 
 app.include_router(portfolio.router, prefix="/api/v1")
 app.include_router(holdings.router, prefix="/api/v1")
@@ -69,6 +69,7 @@ app.include_router(profile.router, prefix="/api/v1")
 app.include_router(advice.router, prefix="/api/v1")
 app.include_router(statements.router, prefix="/api/v1")
 app.include_router(projections.router, prefix="/api/v1")
+app.include_router(session.router, prefix="/api/v1")
 
 
 @app.get("/health")

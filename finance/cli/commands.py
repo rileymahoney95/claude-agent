@@ -150,6 +150,59 @@ def cmd_plan(args):
     return 0
 
 
+def cmd_plan_advisor(args):
+    """Generate an advisor session prompt with recommendations."""
+    from session import generate_session_prompt
+
+    if not getattr(args, 'json', False):
+        print(f"{Style.DIM}Generating advisor session...{Style.RESET_ALL}")
+
+    result = generate_session_prompt()
+
+    if not result.get("success"):
+        if args.json:
+            print(json.dumps(result))
+        else:
+            print(format_error(result.get("error", "Failed to generate session")))
+        return 1
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+
+    prompt = result["prompt"]
+    output_path = REPO_ROOT / "finance" / "templates" / "ADVISOR_SESSION.md"
+    should_save = not getattr(args, 'no_save', False)
+    should_copy = not getattr(args, 'no_copy', False)
+
+    print()
+
+    if should_save:
+        output_path.write_text(prompt)
+        print(format_success(f"Saved to: {output_path}"))
+
+    if should_copy:
+        try:
+            subprocess.run(['pbcopy'], input=prompt.encode(), check=True)
+            print(format_success("Copied to clipboard"))
+        except FileNotFoundError:
+            print(format_error("pbcopy not found (macOS only)"))
+        except subprocess.CalledProcessError as e:
+            print(format_error(f"Failed to copy to clipboard: {e}"))
+
+    # Summary stats
+    data = result.get("data", {})
+    recs = data.get("recommendations", {})
+    high_count = len(recs.get("high", []))
+    total_count = sum(len(v) for v in recs.values())
+
+    print()
+    print(f"{Style.DIM}Session includes: {total_count} recommendations ({high_count} high priority){Style.RESET_ALL}")
+    print(f"{Style.DIM}Generated at: {data.get('generated_at', 'unknown')}{Style.RESET_ALL}")
+
+    return 0
+
+
 def cmd_profile(args):
     """View or edit financial profile."""
     profile = load_profile()

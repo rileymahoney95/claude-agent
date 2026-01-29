@@ -53,6 +53,7 @@ This is a personal automation assistant repository for managing daily tasks and 
   - `analyzer.py` - Goal/allocation analysis + market context
   - `advisor.py` - Recommendation engine with priority logic
   - `projections.py` - Projection settings, historical data, asset class mapping
+  - `session.py` - Advisor session prompt generation for Claude planning
 - `api/` - FastAPI REST server for web UI
 - `mcp/` - Finance MCP server
 - `templates/` - Planning prompt templates
@@ -186,6 +187,7 @@ Parses brokerage statements (PDFs) and auto-updates the financial planning templ
 - **Financial advisor** with prioritized recommendations (rebalancing, surplus allocation, opportunities)
 - **Portfolio projections** with Coast FIRE calculations, scenario management, and historical data
 - Generate populated planning prompts for financial planning sessions
+- **Advisor sessions** - Export comprehensive prompts with portfolio, goals, and recommendations for Claude
 
 **CLI Commands:**
 
@@ -221,6 +223,7 @@ finance profile --edit              # Interactively edit profile
 finance profile --json              # Output as JSON
 
 finance plan                        # Save to PLANNING_SESSION.md + copy to clipboard
+finance plan --advisor              # Generate advisor session with recommendations
 finance plan --no-save              # Only copy to clipboard
 finance plan --no-copy              # Only save to file
 finance plan --json                 # Output as JSON with prompt text
@@ -243,7 +246,7 @@ finance db reset                    # Reset database (delete SQLite file)
 2. Run `finance pull` to process all statements
 3. Statements are moved to `personal/finance/statements/`, parsed, and template updated
 4. Update manual holdings with `finance holdings set` (crypto quantities, bank balances)
-5. Run `finance plan` to save + copy planning prompt for Claude
+5. Run `finance plan` for basic planning prompt, or `finance plan --advisor` for comprehensive session with recommendations
 
 **Data Files:**
 
@@ -252,6 +255,7 @@ finance db reset                    # Reset database (delete SQLite file)
 - `personal/finance/statements/` - Statement PDFs (personal data)
 - `finance/templates/FINANCIAL_PLANNING_PROMPT.md` - Planning template (auto-updated)
 - `finance/templates/PLANNING_SESSION.md` - Generated planning session output
+- `finance/templates/ADVISOR_SESSION.md` - Generated advisor session output
 - `.config/finance-profile.json` - User financial profile
 - `.config/holdings.json` - Manual holdings (crypto, bank accounts, other)
 
@@ -259,7 +263,7 @@ finance db reset                    # Reset database (delete SQLite file)
 
 **MCP Server:** Available via the `finance` MCP server with tools: `pull_statement`, `parse_statement`, `get_finance_history`, `get_finance_summary`, `get_portfolio`, `generate_planning_prompt`, `get_holdings`, `set_holding`, `check_holdings_freshness`, `get_financial_advice`
 
-**API Server:** `finance-api` starts FastAPI on port 8000. Endpoints: `/api/v1/portfolio`, `/api/v1/holdings`, `/api/v1/profile`, `/api/v1/advice`, `/api/v1/statements/history`, `/api/v1/projection/*`. OpenAPI docs at `/docs`.
+**API Server:** `finance-api` starts FastAPI on port 8000. Endpoints: `/api/v1/portfolio`, `/api/v1/holdings`, `/api/v1/profile`, `/api/v1/advice`, `/api/v1/statements/history`, `/api/v1/projection/*`, `/api/v1/session`. OpenAPI docs at `/docs`.
 
 **Database:** SQLite database at `.data/finance/finance.db` (no Docker required). Run `finance db migrate` to initialize. Set `FINANCE_USE_DATABASE=false` to use only JSON files. See `finance/USAGE.md` for details.
 
