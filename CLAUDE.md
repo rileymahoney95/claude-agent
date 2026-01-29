@@ -48,12 +48,15 @@ This is a personal automation assistant repository for managing daily tasks and 
 
 - `cli/` - Finance CLI tool (Python)
   - `finance.py` - Main CLI for statement parsing and planning
-  - `parsers/` - Brokerage statement parsers (SoFi/Apex)
+  - `parsers/` - Statement parsers (SoFi/Apex brokerage, Chase credit card)
   - `aggregator.py` - Unified portfolio view across accounts
   - `analyzer.py` - Goal/allocation analysis + market context
   - `advisor.py` - Recommendation engine with priority logic
   - `projections.py` - Projection settings, historical data, asset class mapping
   - `session.py` - Advisor session prompt generation for Claude planning
+  - `categorizer.py` - AI-powered merchant categorization (Claude API)
+  - `insights.py` - AI-powered spending insights with caching (Claude API)
+  - `recurring.py` - Recurring charge detection across months
 - `api/` - FastAPI REST server for web UI
 - `mcp/` - Finance MCP server
 - `templates/` - Planning prompt templates
@@ -167,13 +170,13 @@ todos archive --all                # Archive ALL completed tasks
 
 ### Finance (`finance/`)
 
-Parses brokerage statements (PDFs) and auto-updates the financial planning template. Stores historical snapshots for tracking portfolio over time. Manages manual holdings (crypto, bank accounts) with live price fetching. Generate populated planning prompts for Claude sessions.
+Parses brokerage statements (PDFs) and auto-updates the financial planning template. Stores historical snapshots for tracking portfolio over time. Manages manual holdings (crypto, bank accounts) with live price fetching. Parses Chase credit card statements with AI-powered categorization and recurring charge detection. Generate populated planning prompts for Claude sessions.
 
 **Usage:** `finance` (requires PATH setup, see [Script Organization](#script-organization))
 
 **Features:**
 
-- Pull all statements from Downloads with one command (batch processing)
+- Pull all statements from Downloads with one command (auto-classifies brokerage + CC)
 - Parses SoFi/Apex Clearing brokerage statements (Roth IRA, Brokerage, Traditional IRA)
 - Extracts holdings, income, and retirement account info
 - Saves historical snapshots to `.data/finance/snapshots/`
@@ -186,13 +189,14 @@ Parses brokerage statements (PDFs) and auto-updates the financial planning templ
 - Market context with BTC/ETH/S&P 500 data and opportunity detection
 - **Financial advisor** with prioritized recommendations (rebalancing, surplus allocation, opportunities)
 - **Portfolio projections** with Coast FIRE calculations, scenario management, and historical data
+- **Credit card expense analysis** - Chase CC statement parsing, AI categorization (Claude API), recurring charge detection, category spending breakdown, AI-powered spending insights
 - Generate populated planning prompts for financial planning sessions
 - **Advisor sessions** - Export comprehensive prompts with portfolio, goals, and recommendations for Claude
 
 **CLI Commands:**
 
 ```bash
-finance pull                        # Pull ALL statements from Downloads (default)
+finance pull                        # Pull ALL statements from Downloads (brokerage + CC)
 finance pull --latest               # Only pull the most recent statement
 finance pull --no-update            # Pull without updating template
 
@@ -232,7 +236,21 @@ finance advise                      # Get prioritized financial recommendations
 finance advise --focus goals        # Focus on goal-related recommendations
 finance advise --focus rebalance    # Focus on allocation/rebalancing
 finance advise --focus surplus      # Focus on surplus allocation
+finance advise --focus spending     # Focus on spending-based recommendations
 finance advise --json               # Output as JSON
+
+finance expenses                       # Show current month summary
+finance expenses import <pdf> [<pdf2>...]  # Import Chase CC statement(s)
+finance expenses import <pdf> --no-categorize  # Skip AI categorization
+finance expenses summary               # Category breakdown
+finance expenses summary --months 3    # Multi-month breakdown
+finance expenses history               # List imported CC statements
+finance expenses recurring             # Show recurring charges
+finance expenses categories            # View merchant->category mappings
+finance expenses set-category M C      # Override a category
+finance expenses insights              # AI spending insights (cached)
+finance expenses insights --months 3   # Analyze last 3 months
+finance expenses insights --refresh    # Regenerate (bypass cache)
 
 finance db status                   # Check database status
 finance db migrate                  # Migrate JSON data to SQLite
@@ -263,7 +281,7 @@ finance db reset                    # Reset database (delete SQLite file)
 
 **MCP Server:** Available via the `finance` MCP server with tools: `pull_statement`, `parse_statement`, `get_finance_history`, `get_finance_summary`, `get_portfolio`, `generate_planning_prompt`, `get_holdings`, `set_holding`, `check_holdings_freshness`, `get_financial_advice`
 
-**API Server:** `finance-api` starts FastAPI on port 8000. Endpoints: `/api/v1/portfolio`, `/api/v1/holdings`, `/api/v1/profile`, `/api/v1/advice`, `/api/v1/statements/history`, `/api/v1/projection/*`, `/api/v1/session`. OpenAPI docs at `/docs`.
+**API Server:** `finance-api` starts FastAPI on port 8000. Endpoints: `/api/v1/portfolio`, `/api/v1/portfolio/history`, `/api/v1/holdings`, `/api/v1/profile`, `/api/v1/advice`, `/api/v1/statements/history`, `/api/v1/statements/import`, `/api/v1/projection/*`, `/api/v1/session`, `/api/v1/expenses/*`, `/api/v1/expenses/insights`. OpenAPI docs at `/docs`.
 
 **Database:** SQLite database at `.data/finance/finance.db` (no Docker required). Run `finance db migrate` to initialize. Set `FINANCE_USE_DATABASE=false` to use only JSON files. See `finance/USAGE.md` for details.
 

@@ -11,7 +11,7 @@ router = APIRouter(tags=["advice"])
 
 @router.get("/advice")
 def get_financial_advice(
-    focus: Literal["all", "goals", "rebalance", "surplus", "opportunities"] = Query(
+    focus: Literal["all", "goals", "rebalance", "surplus", "opportunities", "spending"] = Query(
         "all", description="Filter recommendations by focus area"
     ),
 ):

@@ -1,7 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getStatementsHistory, pullStatements, uploadStatement } from "@/lib/api";
-import type { StatementsHistory } from "@/lib/types";
+import {
+  getStatementsHistory,
+  pullStatements,
+  uploadStatement,
+  importStatements,
+} from "@/lib/api";
+import type { StatementsHistory, ImportStatementsResponse } from "@/lib/types";
 
 /**
  * Fetch snapshot history with optional account filter.
@@ -67,6 +72,34 @@ export function useUploadStatement() {
     },
     onError: (error) => {
       toast.error(`Failed to upload statement: ${error.message}`);
+    },
+  });
+}
+
+/**
+ * Mutation to upload multiple statement PDFs with auto-classification.
+ */
+export function useImportStatements() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (files: File[]) => importStatements(files),
+    onSuccess: (data: ImportStatementsResponse) => {
+      if (data.success) {
+        toast.success(
+          `Imported ${data.imported} statement${data.imported !== 1 ? "s" : ""}${
+            data.failed > 0 ? ` (${data.failed} failed)` : ""
+          }`
+        );
+      } else {
+        toast.error("All imports failed");
+      }
+      queryClient.invalidateQueries({ queryKey: ["statements"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
+    },
+    onError: (error) => {
+      toast.error(`Import failed: ${error.message}`);
     },
   });
 }

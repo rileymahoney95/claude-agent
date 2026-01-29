@@ -3,6 +3,7 @@
 
 import type {
   Portfolio,
+  PortfolioHistoryResponse,
   HoldingsResponse,
   HoldingsFreshnessResponse,
   HoldingUpdateResponse,
@@ -24,6 +25,14 @@ import type {
   ScenarioSettingsAPI,
   SessionResponse,
   SessionFormat,
+  ExpenseTransactionsResponse,
+  ExpenseSummary,
+  ExpenseRecurringResponse,
+  ExpenseMonthOverMonthResponse,
+  ExpenseStatementsResponse,
+  ExpenseImportResponse,
+  ExpenseCategoriesResponse,
+  ImportStatementsResponse,
 } from './types';
 
 const API_URL =
@@ -51,6 +60,23 @@ export async function getPortfolio(options?: {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch portfolio: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Get portfolio value history over time with account breakdown.
+ * @param months - Months of history (default 12)
+ */
+export async function getPortfolioHistory(
+  months = 12
+): Promise<PortfolioHistoryResponse> {
+  const params = new URLSearchParams({ months: months.toString() });
+  const response = await fetch(`${API_URL}/portfolio/history?${params}`);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch portfolio history: ${response.statusText}`
+    );
   }
   return response.json();
 }
@@ -281,6 +307,51 @@ export async function uploadStatement(
   return response.json();
 }
 
+/**
+ * Upload and process multiple statement PDFs with auto-classification.
+ * Each file is classified (SoFi/Apex brokerage or Chase CC) and routed to the correct parser.
+ */
+export async function importStatements(
+  files: File[],
+  options?: { noCategorize?: boolean }
+): Promise<ImportStatementsResponse> {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append('files', file);
+  }
+
+  const params = new URLSearchParams();
+  if (options?.noCategorize) {
+    params.set('no_categorize', 'true');
+  }
+  const url = params.toString()
+    ? `${API_URL}/statements/import?${params}`
+    : `${API_URL}/statements/import`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    return {
+      success: false,
+      total: files.length,
+      imported: 0,
+      failed: files.length,
+      template_updated: false,
+      results: files.map((f) => ({
+        filename: f.name,
+        type: null,
+        success: false,
+        error: error.detail || response.statusText,
+      })),
+    };
+  }
+  return response.json();
+}
+
 // ============================================================================
 // Projections
 // ============================================================================
@@ -454,4 +525,178 @@ export async function getSession(
 export async function getSessionMarkdown(): Promise<string> {
   const result = await getSession('markdown');
   return typeof result === 'string' ? result : (result.prompt ?? '');
+}
+
+// ============================================================================
+// Expenses
+// ============================================================================
+
+/**
+ * Get credit card transactions with optional filters.
+ */
+export async function getExpenses(options?: {
+  startDate?: string;
+  endDate?: string;
+  category?: string;
+  merchant?: string;
+  limit?: number;
+}): Promise<ExpenseTransactionsResponse> {
+  const params = new URLSearchParams();
+  if (options?.startDate) params.set('start_date', options.startDate);
+  if (options?.endDate) params.set('end_date', options.endDate);
+  if (options?.category) params.set('category', options.category);
+  if (options?.merchant) params.set('merchant', options.merchant);
+  if (options?.limit) params.set('limit', options.limit.toString());
+  const url = params.toString()
+    ? `${API_URL}/expenses?${params}`
+    : `${API_URL}/expenses`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch expenses: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Get expense summary with category breakdown.
+ * @param months - Number of months to include
+ */
+export async function getExpenseSummary(
+  months = 1
+): Promise<ExpenseSummary> {
+  const params = new URLSearchParams({ months: months.toString() });
+  const response = await fetch(`${API_URL}/expenses/summary?${params}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch expense summary: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Get recurring charges.
+ */
+export async function getRecurringExpenses(): Promise<ExpenseRecurringResponse> {
+  const response = await fetch(`${API_URL}/expenses/recurring`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch recurring expenses: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Get month-over-month spending comparison.
+ */
+export async function getMonthOverMonth(
+  months = 6
+): Promise<ExpenseMonthOverMonthResponse> {
+  const params = new URLSearchParams({ months: months.toString() });
+  const response = await fetch(`${API_URL}/expenses/month-over-month?${params}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch month over month: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Get imported CC statement list.
+ */
+export async function getExpenseStatements(): Promise<ExpenseStatementsResponse> {
+  const response = await fetch(`${API_URL}/expenses/statements`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch expense statements: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Upload and import a credit card statement PDF.
+ */
+export async function importExpenseStatement(
+  file: File,
+  options?: { noCategorize?: boolean }
+): Promise<ExpenseImportResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const params = new URLSearchParams();
+  if (options?.noCategorize) params.set('no_categorize', 'true');
+  const url = params.toString()
+    ? `${API_URL}/expenses/import?${params}`
+    : `${API_URL}/expenses/import`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    return { success: false, error: error.detail || response.statusText };
+  }
+  return response.json();
+}
+
+/**
+ * Get merchant category mappings.
+ */
+export async function getExpenseCategories(): Promise<ExpenseCategoriesResponse> {
+  const response = await fetch(`${API_URL}/expenses/categories`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch expense categories: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/**
+ * Override a merchant's category.
+ */
+export async function setExpenseCategory(
+  merchant: string,
+  category: string
+): Promise<{ success: boolean; transactions_updated: number }> {
+  const response = await fetch(
+    `${API_URL}/expenses/categories/${encodeURIComponent(merchant)}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category }),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || response.statusText);
+  }
+  return response.json();
+}
+
+/**
+ * Get AI-powered spending insights.
+ */
+export async function getSpendingInsights(
+  months = 3
+): Promise<import("./types").SpendingInsightsResponse> {
+  const response = await fetch(`${API_URL}/expenses/insights?months=${months}`);
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || response.statusText);
+  }
+  return response.json();
+}
+
+/**
+ * Force regeneration of spending insights.
+ */
+export async function refreshSpendingInsights(
+  months = 3
+): Promise<import("./types").SpendingInsightsResponse> {
+  const response = await fetch(
+    `${API_URL}/expenses/insights/refresh?months=${months}`,
+    { method: 'POST' }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.detail || response.statusText);
+  }
+  return response.json();
 }

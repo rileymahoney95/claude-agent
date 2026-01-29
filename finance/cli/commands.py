@@ -61,6 +61,7 @@ from templates import (
 # Import parser from parsers module
 sys.path.insert(0, str(Path(__file__).parent))
 from parsers.sofi_apex import parse_statement, is_sofi_apex_statement
+from classifier import classify_statement, STATEMENT_TYPE_SOFI_APEX, STATEMENT_TYPE_CHASE_CC
 
 
 def cmd_plan(args):
@@ -668,41 +669,56 @@ def cmd_pull(args):
         return 1
 
     pdf_files = list(downloads_dir.glob("*.pdf"))
-    statements = []
+    brokerage_statements = []
+    cc_statements = []
 
     for pdf in pdf_files:
         try:
-            if is_sofi_apex_statement(str(pdf)):
-                statements.append(pdf)
+            stmt_type = classify_statement(str(pdf))
+            if stmt_type == STATEMENT_TYPE_SOFI_APEX:
+                brokerage_statements.append(pdf)
+            elif stmt_type == STATEMENT_TYPE_CHASE_CC:
+                cc_statements.append(pdf)
         except Exception:
             continue
 
-    if not statements:
-        result = {"success": False, "error": "No SoFi/Apex statements found in Downloads. Download a statement first."}
+    if not brokerage_statements and not cc_statements:
+        result = {"success": False, "error": "No recognized statements found in Downloads. Download a statement first."}
         if args.json:
             print(json.dumps(result))
         else:
             print(format_error(result["error"]))
         return 1
 
-    statements.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    # Sort by modification time (newest first)
+    brokerage_statements.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    cc_statements.sort(key=lambda f: f.stat().st_mtime, reverse=True)
 
     if getattr(args, 'latest', False):
-        to_process = [statements[0]]
+        # When --latest, pick the single newest file across both types
+        all_found = [(pdf, STATEMENT_TYPE_SOFI_APEX) for pdf in brokerage_statements] + \
+                    [(pdf, STATEMENT_TYPE_CHASE_CC) for pdf in cc_statements]
+        all_found.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
+        brokerage_to_process = [p for p, t in all_found[:1] if t == STATEMENT_TYPE_SOFI_APEX]
+        cc_to_process = [p for p, t in all_found[:1] if t == STATEMENT_TYPE_CHASE_CC]
     else:
-        to_process = statements
+        brokerage_to_process = brokerage_statements
+        cc_to_process = cc_statements
+
+    total_count = len(brokerage_to_process) + len(cc_to_process)
 
     if not args.json:
         print()
-        if len(to_process) > 1:
-            print(format_header(f"Processing {len(to_process)} statements"))
+        if total_count > 1:
+            print(format_header(f"Processing {total_count} statements"))
             print()
 
     results = []
     processed_data = []
     errors = []
 
-    for source_pdf in to_process:
+    # Process brokerage statements
+    for source_pdf in brokerage_to_process:
         result = _process_single_statement(source_pdf, quiet=args.json)
         results.append(result)
 
@@ -711,11 +727,67 @@ def cmd_pull(args):
         else:
             errors.append(result)
 
-        if not args.json and len(to_process) > 1:
+        if not args.json and total_count > 1:
             print()
 
+    # Process credit card statements
+    if cc_to_process:
+        from parsers.chase_cc import parse_chase_cc_statement
+        from database import (
+            init_database, save_cc_statement, save_cc_transactions,
+            get_cached_merchant_category,
+        )
+        init_database()
+
+        for source_pdf in cc_to_process:
+            if not args.json:
+                print(f"{Style.DIM}Parsing {source_pdf.name}...{Style.RESET_ALL}")
+
+            try:
+                data = parse_chase_cc_statement(str(source_pdf))
+                statement_id = save_cc_statement(data, source_file=source_pdf.name)
+
+                for txn in data["transactions"]:
+                    cached = get_cached_merchant_category(txn["normalized_merchant"])
+                    if cached:
+                        txn["category"] = cached["category"]
+
+                if not getattr(args, 'no_update', False):
+                    try:
+                        from categorizer import categorize_transactions
+                        data["transactions"] = categorize_transactions(data["transactions"])
+                    except Exception as e:
+                        if not args.json:
+                            print(f"{Fore.YELLOW}Warning: AI categorization skipped: {e}{Style.RESET_ALL}")
+
+                txn_count = save_cc_transactions(statement_id, data["transactions"])
+
+                cc_result = {
+                    "success": True,
+                    "type": "chase_cc",
+                    "filename": source_pdf.name,
+                    "card_type": data["card_type"],
+                    "statement_date": data["statement_date"],
+                    "transactions_imported": txn_count,
+                }
+                results.append(cc_result)
+
+                if not args.json:
+                    card = data["card_type"].replace("_", " ").title()
+                    print(format_success(f"Imported {card} — {txn_count} transactions ({data['statement_date']})"))
+
+            except Exception as e:
+                cc_result = {"success": False, "type": "chase_cc", "filename": source_pdf.name, "error": str(e)}
+                results.append(cc_result)
+                errors.append(cc_result)
+                if not args.json:
+                    print(format_error(f"{source_pdf.name}: {e}"))
+
+            if not args.json and total_count > 1:
+                print()
+
     template_updated = False
-    if not args.no_update and processed_data:
+    if not getattr(args, 'no_update', False) and processed_data:
         template_updated = update_template(processed_data[0], all_snapshots=processed_data)
 
     if not args.json and template_updated:
@@ -723,14 +795,14 @@ def cmd_pull(args):
         print()
 
     if args.json:
-        if len(to_process) == 1:
+        if total_count == 1 and len(results) == 1:
             result = results[0]
             result["template_updated"] = template_updated
             print(json.dumps(result, indent=2))
         else:
             batch_result = {
                 "success": len(errors) == 0,
-                "processed_count": len(processed_data),
+                "processed_count": len(results) - len(errors),
                 "statements": results,
                 "template_updated": template_updated,
                 "errors": errors
@@ -738,7 +810,7 @@ def cmd_pull(args):
             print(json.dumps(batch_result, indent=2))
     else:
         for result in results:
-            if result["success"]:
+            if result.get("success") and result.get("data"):
                 _display_statement_summary(result["data"])
 
     return 0 if not errors else 1
@@ -1098,6 +1170,7 @@ def _print_recommendation_v2(rec: dict, num: int, width: int, box_line, box_empt
         "surplus": "[S]",
         "opportunity": "[O]",
         "warning": "[W]",
+        "spending": "[$]",
     }.get(rec_type, "[-]")
 
     # Action line
@@ -1129,6 +1202,482 @@ def _print_recommendation_v2(rec: dict, num: int, width: int, box_line, box_empt
         box_line(f"   {Fore.CYAN}-> {impact_display}{Style.RESET_ALL}")
 
     box_empty()
+
+
+def cmd_expenses(args):
+    """Handle expenses command and subcommands."""
+    subcmd = getattr(args, 'expenses_command', None)
+
+    if subcmd == 'import':
+        return _cmd_expenses_import(args)
+    elif subcmd == 'summary':
+        return _cmd_expenses_summary(args)
+    elif subcmd == 'history':
+        return _cmd_expenses_history(args)
+    elif subcmd == 'recurring':
+        return _cmd_expenses_recurring(args)
+    elif subcmd == 'categories':
+        return _cmd_expenses_categories(args)
+    elif subcmd == 'set-category':
+        return _cmd_expenses_set_category(args)
+    elif subcmd == 'insights':
+        return _cmd_expenses_insights(args)
+    else:
+        # Default: show current month summary
+        args.months = 1
+        return _cmd_expenses_summary(args)
+
+
+def _cmd_expenses_import(args):
+    """Import one or more credit card statement PDFs."""
+    from parsers.chase_cc import is_chase_cc_statement, parse_chase_cc_statement
+    from database import (
+        init_database, save_cc_statement, save_cc_transactions,
+        get_cached_merchant_category,
+    )
+
+    statements = getattr(args, 'statements', None) or [getattr(args, 'statement', None)]
+    statements = [s for s in statements if s]
+
+    if not statements:
+        result = {"success": False, "error": "No statement files provided"}
+        if args.json:
+            print(json.dumps(result))
+        else:
+            print(format_error(result["error"]))
+        return 1
+
+    init_database()
+
+    results = []
+    errors = []
+    multi = len(statements) > 1
+
+    if multi and not args.json:
+        print()
+        print(format_header(f"Importing {len(statements)} statements"))
+        print()
+
+    for stmt_path_str in statements:
+        pdf_path = Path(stmt_path_str).expanduser()
+        if not pdf_path.exists():
+            r = {"success": False, "error": f"File not found: {pdf_path}", "filename": pdf_path.name}
+            results.append(r)
+            errors.append(r)
+            if not args.json:
+                print(format_error(r["error"]))
+            continue
+
+        if not is_chase_cc_statement(str(pdf_path)):
+            r = {"success": False, "error": "Not a recognized Chase credit card statement", "filename": pdf_path.name}
+            results.append(r)
+            errors.append(r)
+            if not args.json:
+                print(format_error(f"{pdf_path.name}: {r['error']}"))
+            continue
+
+        if not args.json:
+            print(f"{Style.DIM}Parsing {pdf_path.name}...{Style.RESET_ALL}")
+
+        try:
+            data = parse_chase_cc_statement(str(pdf_path))
+        except Exception as e:
+            r = {"success": False, "error": f"Failed to parse: {e}", "filename": pdf_path.name}
+            results.append(r)
+            errors.append(r)
+            if not args.json:
+                print(format_error(f"{pdf_path.name}: {r['error']}"))
+            continue
+
+        statement_id = save_cc_statement(data, source_file=pdf_path.name)
+
+        for txn in data["transactions"]:
+            cached = get_cached_merchant_category(txn["normalized_merchant"])
+            if cached:
+                txn["category"] = cached["category"]
+
+        if not getattr(args, 'no_categorize', False):
+            try:
+                from categorizer import categorize_transactions
+                data["transactions"] = categorize_transactions(data["transactions"])
+            except Exception as e:
+                if not args.json:
+                    print(f"{Fore.YELLOW}Warning: AI categorization skipped: {e}{Style.RESET_ALL}")
+
+        txn_count = save_cc_transactions(statement_id, data["transactions"])
+
+        result = {
+            "success": True,
+            "filename": pdf_path.name,
+            "statement_id": statement_id,
+            "card_type": data["card_type"],
+            "statement_date": data["statement_date"],
+            "transactions_imported": txn_count,
+            "new_balance": data["summary"].get("new_balance"),
+            "total_purchases": data["summary"].get("purchases"),
+        }
+        results.append(result)
+
+        if not args.json:
+            print()
+            print(format_header(f"Credit Card Statement Imported"))
+            print()
+            card = data["card_type"].replace("_", " ").title()
+            acct = data.get("account_last_four", "????")
+            print(f"  Card:         {card} (***{acct})")
+            print(f"  Period:       {data['period'].get('start', '?')} to {data['period'].get('end', '?')}")
+
+            purchases = data["summary"].get("purchases")
+            if purchases is not None:
+                print(f"  Purchases:    {Fore.RED}${purchases:,.2f}{Style.RESET_ALL}")
+
+            new_bal = data["summary"].get("new_balance")
+            if new_bal is not None:
+                print(f"  New Balance:  ${new_bal:,.2f}")
+
+            print(f"  Transactions: {txn_count}")
+
+            categorized = [t for t in data["transactions"] if t.get("category")]
+            if categorized:
+                print()
+                print(format_header("Categories"))
+                cat_totals = {}
+                for t in categorized:
+                    cat = t["category"]
+                    cat_totals[cat] = cat_totals.get(cat, 0) + t["amount"]
+                for cat, total in sorted(cat_totals.items(), key=lambda x: -x[1]):
+                    print(f"  {cat:<20} ${total:>10,.2f}")
+
+            uncategorized = len(data["transactions"]) - len(categorized)
+            if uncategorized > 0:
+                print(f"\n  {Style.DIM}{uncategorized} transactions uncategorized{Style.RESET_ALL}")
+
+            print()
+            print(format_success(f"Statement saved (ID: {statement_id})"))
+
+    if args.json:
+        if len(results) == 1:
+            print(json.dumps(results[0], indent=2))
+        else:
+            print(json.dumps({
+                "success": len(errors) == 0,
+                "imported": len(results) - len(errors),
+                "failed": len(errors),
+                "results": results,
+            }, indent=2))
+
+    # Invalidate insights cache since new data was imported
+    if any(r.get("success") for r in results):
+        try:
+            from database import invalidate_insights_cache
+            invalidated = invalidate_insights_cache()
+            if invalidated > 0 and not args.json:
+                print(f"{Style.DIM}Cleared {invalidated} cached insight(s){Style.RESET_ALL}")
+        except Exception:
+            pass
+
+    return 0 if not errors else 1
+
+
+def _cmd_expenses_summary(args):
+    """Show expense summary with category breakdown."""
+    from database import init_database, get_expense_summary
+
+    init_database()
+    months = getattr(args, 'months', 1)
+    summary = get_expense_summary(months)
+
+    if args.json:
+        print(json.dumps({"success": True, **summary}, indent=2))
+        return 0
+
+    total = summary["total_purchases"]
+    count = summary["transaction_count"]
+
+    if count == 0:
+        print(f"\n{Style.DIM}No expense data found. Run 'finance expenses import <pdf>' first.{Style.RESET_ALL}")
+        return 0
+
+    date_range = summary["date_range"]
+    print()
+    print(format_header(f"Expense Summary ({months} month{'s' if months > 1 else ''})"))
+    print(f"{Style.DIM}{date_range['start']} to {date_range['end']}{Style.RESET_ALL}")
+    print()
+
+    print(f"  {'Total Spending:':<20} {Fore.RED}${total:>10,.2f}{Style.RESET_ALL}")
+    print(f"  {'Transactions:':<20} {count}")
+
+    # Days in range for avg/day
+    if date_range["start"] and date_range["end"]:
+        from datetime import datetime as dt
+        try:
+            start = dt.strptime(date_range["start"], "%Y-%m-%d")
+            end = dt.strptime(date_range["end"], "%Y-%m-%d")
+            days = max((end - start).days, 1)
+            avg_day = total / days
+            print(f"  {'Avg/Day:':<20} ${avg_day:>10,.2f}")
+        except ValueError:
+            pass
+
+    print()
+    print(format_header("By Category"))
+    print()
+
+    for cat_data in summary["by_category"]:
+        cat = cat_data["category"]
+        cat_total = cat_data["total"]
+        cat_count = cat_data["count"]
+        pct = (cat_total / total * 100) if total > 0 else 0
+        print(f"  {cat:<20} ${cat_total:>10,.2f}  ({pct:>5.1f}%)  [{cat_count} txns]")
+
+    print()
+    return 0
+
+
+def _cmd_expenses_history(args):
+    """List imported CC statements."""
+    from database import init_database, get_cc_statements
+
+    init_database()
+    statements = get_cc_statements()
+
+    if args.json:
+        print(json.dumps({"success": True, "statements": statements, "count": len(statements)}, indent=2))
+        return 0
+
+    if not statements:
+        print(f"\n{Style.DIM}No CC statements imported. Run 'finance expenses import <pdf>' first.{Style.RESET_ALL}")
+        return 0
+
+    print()
+    print(format_header(f"Imported CC Statements ({len(statements)})"))
+    print()
+
+    table_data = []
+    for stmt in statements:
+        card = (stmt.get("card_type") or "unknown").replace("_", " ").title()
+        acct = stmt.get("account_last_four", "????")
+        date = stmt.get("statement_date", "?")
+        balance = stmt.get("new_balance")
+        balance_str = f"${balance:,.2f}" if balance is not None else "N/A"
+        table_data.append([date, f"{card} (***{acct})", balance_str])
+
+    headers = [
+        f"{Style.DIM}Date{Style.RESET_ALL}",
+        f"{Style.DIM}Card{Style.RESET_ALL}",
+        f"{Style.DIM}Balance{Style.RESET_ALL}",
+    ]
+    print(tabulate(table_data, headers=headers, tablefmt="plain"))
+    print()
+    return 0
+
+
+def _cmd_expenses_recurring(args):
+    """Show recurring charges."""
+    from database import init_database
+    from recurring import detect_recurring
+
+    init_database()
+    recurring = detect_recurring()
+
+    if args.json:
+        print(json.dumps({"success": True, "recurring": recurring, "count": len(recurring)}, indent=2))
+        return 0
+
+    if not recurring:
+        print(f"\n{Style.DIM}No recurring charges detected. Need 2+ months of data.{Style.RESET_ALL}")
+        return 0
+
+    print()
+    print(format_header(f"Recurring Charges ({len(recurring)})"))
+    print()
+
+    total_monthly = 0
+    table_data = []
+    for item in recurring:
+        merchant = item["merchant"]
+        cat = item.get("category") or "Uncategorized"
+        avg = item["avg_amount"]
+        months = item["months_seen"]
+        total_monthly += avg
+        table_data.append([
+            merchant[:30],
+            cat,
+            f"${avg:,.2f}/mo",
+            f"{months} months",
+        ])
+
+    headers = [
+        f"{Style.DIM}Merchant{Style.RESET_ALL}",
+        f"{Style.DIM}Category{Style.RESET_ALL}",
+        f"{Style.DIM}Avg Amount{Style.RESET_ALL}",
+        f"{Style.DIM}Frequency{Style.RESET_ALL}",
+    ]
+    print(tabulate(table_data, headers=headers, tablefmt="plain"))
+    print()
+    print(f"  {Style.DIM}Estimated monthly total: ${total_monthly:,.2f}{Style.RESET_ALL}")
+    print()
+    return 0
+
+
+def _cmd_expenses_categories(args):
+    """View merchant->category mappings."""
+    from database import init_database, get_all_merchant_categories
+
+    init_database()
+    categories = get_all_merchant_categories()
+
+    if args.json:
+        print(json.dumps({"success": True, "categories": categories, "count": len(categories)}, indent=2))
+        return 0
+
+    if not categories:
+        print(f"\n{Style.DIM}No merchant categories found. Import a statement first.{Style.RESET_ALL}")
+        return 0
+
+    print()
+    print(format_header(f"Merchant Categories ({len(categories)})"))
+    print()
+
+    table_data = []
+    for cat in categories:
+        confidence_str = f"{Fore.CYAN}manual{Style.RESET_ALL}" if cat["confidence"] == "manual" else f"{Style.DIM}ai{Style.RESET_ALL}"
+        table_data.append([
+            cat["normalized_merchant"][:35],
+            cat["category"],
+            confidence_str,
+        ])
+
+    headers = [
+        f"{Style.DIM}Merchant{Style.RESET_ALL}",
+        f"{Style.DIM}Category{Style.RESET_ALL}",
+        f"{Style.DIM}Source{Style.RESET_ALL}",
+    ]
+    print(tabulate(table_data, headers=headers, tablefmt="plain"))
+    print()
+    return 0
+
+
+def _cmd_expenses_set_category(args):
+    """Override a merchant's category."""
+    from database import (
+        init_database, cache_merchant_category,
+        update_transaction_categories,
+    )
+
+    init_database()
+    merchant = args.merchant.lower().strip()
+    category = args.category
+
+    # Validate category
+    from config import EXPENSE_CATEGORIES
+    if category not in EXPENSE_CATEGORIES:
+        result = {
+            "success": False,
+            "error": f"Invalid category '{category}'. Valid: {', '.join(EXPENSE_CATEGORIES)}",
+        }
+        if args.json:
+            print(json.dumps(result))
+        else:
+            print(format_error(result["error"]))
+        return 1
+
+    cache_merchant_category(merchant, category, confidence="manual")
+    updated = update_transaction_categories(merchant, category)
+
+    result = {
+        "success": True,
+        "merchant": merchant,
+        "category": category,
+        "transactions_updated": updated,
+    }
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(format_success(f"Set '{merchant}' -> {category} ({updated} transactions updated)"))
+
+    return 0
+
+
+def _cmd_expenses_insights(args):
+    """Generate and display AI spending insights."""
+    from insights import get_spending_insights
+
+    months = getattr(args, 'months', 3)
+    refresh = getattr(args, 'refresh', False)
+
+    if not args.json and not refresh:
+        print(f"{Style.DIM}Analyzing spending data...{Style.RESET_ALL}")
+
+    if not args.json and refresh:
+        print(f"{Style.DIM}Regenerating spending insights...{Style.RESET_ALL}")
+
+    result = get_spending_insights(months=months, refresh=refresh)
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("success") else 1
+
+    if not result.get("success"):
+        print(format_error(result.get("error", "Unknown error")))
+        return 1
+
+    insights = result["insights"]
+
+    print()
+    print(format_header(f"Spending Insights ({months} month{'s' if months > 1 else ''})"))
+
+    if result.get("cached"):
+        print(f"{Style.DIM}Cached from: {result.get('generated_at', 'unknown')}{Style.RESET_ALL}")
+    else:
+        print(f"{Style.DIM}Generated: {result.get('generated_at', 'unknown')}{Style.RESET_ALL}")
+
+    print()
+
+    severity_icons = {
+        "important": f"{Fore.RED}!{Style.RESET_ALL}",
+        "moderate": f"{Fore.YELLOW}~{Style.RESET_ALL}",
+        "info": f"{Fore.CYAN}i{Style.RESET_ALL}",
+    }
+
+    type_labels = {
+        "trend": "TREND",
+        "anomaly": "ANOMALY",
+        "saving_opportunity": "SAVING",
+        "pattern": "PATTERN",
+        "warning": "WARNING",
+    }
+
+    for i, insight in enumerate(insights, 1):
+        severity = insight.get("severity", "info")
+        insight_type = insight.get("type", "info")
+        icon = severity_icons.get(severity, "·")
+        label = type_labels.get(insight_type, insight_type.upper())
+
+        print(f"  [{icon}] {Style.BRIGHT}{insight['title']}{Style.RESET_ALL}  {Style.DIM}({label}){Style.RESET_ALL}")
+        print(f"      {insight['description']}")
+
+        # Show key data points
+        data = insight.get("data", {})
+        if data:
+            data_parts = []
+            for k, v in data.items():
+                if isinstance(v, float):
+                    if "pct" in k or "percent" in k or "change" in k:
+                        data_parts.append(f"{k}: {v:+.1f}%")
+                    else:
+                        data_parts.append(f"{k}: ${v:,.2f}")
+                elif v is not None:
+                    data_parts.append(f"{k}: {v}")
+            if data_parts:
+                print(f"      {Style.DIM}{' | '.join(data_parts)}{Style.RESET_ALL}")
+
+        print()
+
+    print(f"{Style.DIM}Run 'finance expenses insights --refresh' to regenerate{Style.RESET_ALL}")
+    print()
+    return 0
 
 
 def cmd_db(args):

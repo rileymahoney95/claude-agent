@@ -10,9 +10,17 @@ from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 
 from snapshots import load_snapshots, save_snapshot
 from commands import cmd_pull
+from classifier import classify_statement, STATEMENT_TYPE_SOFI_APEX, STATEMENT_TYPE_CHASE_CC
 from parsers.sofi_apex import parse_statement, is_sofi_apex_statement
+from parsers.chase_cc import parse_chase_cc_statement
 from config import STATEMENTS_DIR
 from templates import update_template
+from database import (
+    init_database,
+    save_cc_statement,
+    save_cc_transactions,
+    get_cached_merchant_category,
+)
 
 router = APIRouter(tags=["statements"])
 
@@ -176,3 +184,163 @@ def upload_statement(
             if tmp_path.exists():
                 tmp_path.unlink()
             raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+
+@router.post("/statements/import")
+def import_statements(
+    files: list[UploadFile] = File(..., description="One or more PDF statement files"),
+    no_categorize: bool = Query(False, description="Skip AI categorization for credit card statements"),
+):
+    """Upload and process multiple statement PDFs with auto-classification.
+
+    Accepts mixed statement types (SoFi/Apex brokerage, Chase credit card).
+    Each file is classified and routed to the correct parser.
+
+    Note: PDF parsing and optional AI categorization are blocking.
+    Using sync function so FastAPI runs it in a thread pool.
+    """
+    results = []
+    brokerage_data = []
+
+    for upload_file in files:
+        filename = upload_file.filename or "unknown.pdf"
+
+        if not filename.lower().endswith(".pdf"):
+            results.append({
+                "filename": filename,
+                "type": None,
+                "success": False,
+                "error": "File must be a PDF",
+            })
+            continue
+
+        # Write to temp file for classification and parsing
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp_path = Path(tmp.name)
+            try:
+                content = upload_file.file.read()
+                tmp.write(content)
+                tmp.flush()
+
+                statement_type = classify_statement(str(tmp_path))
+
+                if statement_type == STATEMENT_TYPE_SOFI_APEX:
+                    result = _process_sofi_apex(tmp_path, filename)
+                    if result["success"]:
+                        brokerage_data.append(result.get("_data"))
+                    # Remove internal data from response
+                    result.pop("_data", None)
+                    results.append(result)
+
+                elif statement_type == STATEMENT_TYPE_CHASE_CC:
+                    result = _process_chase_cc(tmp_path, filename, no_categorize)
+                    results.append(result)
+
+                else:
+                    tmp_path.unlink(missing_ok=True)
+                    results.append({
+                        "filename": filename,
+                        "type": "unknown",
+                        "success": False,
+                        "error": "Unrecognized statement format",
+                    })
+
+            except Exception as e:
+                tmp_path.unlink(missing_ok=True)
+                results.append({
+                    "filename": filename,
+                    "type": None,
+                    "success": False,
+                    "error": str(e),
+                })
+
+    # Update template if any brokerage statements were processed
+    template_updated = False
+    if brokerage_data:
+        template_updated = update_template(brokerage_data[0], all_snapshots=brokerage_data)
+
+    success_count = sum(1 for r in results if r["success"])
+
+    return {
+        "success": success_count > 0,
+        "total": len(results),
+        "imported": success_count,
+        "failed": len(results) - success_count,
+        "template_updated": template_updated,
+        "results": results,
+    }
+
+
+def _process_sofi_apex(tmp_path: Path, filename: str) -> dict:
+    """Process a SoFi/Apex brokerage statement."""
+    try:
+        STATEMENTS_DIR.mkdir(parents=True, exist_ok=True)
+        dest_path = STATEMENTS_DIR / filename
+        shutil.move(str(tmp_path), str(dest_path))
+
+        data = parse_statement(str(dest_path))
+        snapshot_path = save_snapshot(data)
+
+        return {
+            "filename": filename,
+            "type": "sofi_apex",
+            "success": True,
+            "account": data.get("account_type"),
+            "date": data.get("statement_date"),
+            "total_value": data.get("portfolio", {}).get("total_value", 0),
+            "snapshot_path": str(snapshot_path),
+            "_data": data,
+        }
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        return {
+            "filename": filename,
+            "type": "sofi_apex",
+            "success": False,
+            "error": f"Parse failed: {e}",
+        }
+
+
+def _process_chase_cc(tmp_path: Path, filename: str, no_categorize: bool) -> dict:
+    """Process a Chase credit card statement."""
+    try:
+        data = parse_chase_cc_statement(str(tmp_path))
+        tmp_path.unlink(missing_ok=True)
+
+        init_database()
+        statement_id = save_cc_statement(data, source_file=filename)
+
+        # Apply cached categories
+        for txn in data["transactions"]:
+            cached = get_cached_merchant_category(txn["normalized_merchant"])
+            if cached:
+                txn["category"] = cached["category"]
+
+        # AI categorization
+        if not no_categorize:
+            try:
+                from categorizer import categorize_transactions
+                data["transactions"] = categorize_transactions(data["transactions"])
+            except Exception:
+                pass
+
+        txn_count = save_cc_transactions(statement_id, data["transactions"])
+
+        return {
+            "filename": filename,
+            "type": "chase_cc",
+            "success": True,
+            "card_type": data.get("card_type"),
+            "statement_date": data.get("statement_date"),
+            "transactions_imported": txn_count,
+            "new_balance": data.get("summary", {}).get("new_balance"),
+            "total_purchases": data.get("summary", {}).get("purchases"),
+        }
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        return {
+            "filename": filename,
+            "type": "chase_cc",
+            "success": False,
+            "error": f"Parse failed: {e}",
+        }

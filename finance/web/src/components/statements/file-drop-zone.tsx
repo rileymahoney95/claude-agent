@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import { Upload, FileText, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Upload, FileText, Loader2, CheckCircle, XCircle, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { useUploadStatement } from '@/lib/hooks/use-statements';
+import { Button } from '@/components/ui/button';
+import { useImportStatements } from '@/lib/hooks/use-statements';
+import type { ImportStatementResult } from '@/lib/types';
 
 interface FileDropZoneProps {
   className?: string;
@@ -13,23 +15,40 @@ interface FileDropZoneProps {
 interface UploadResult {
   success: boolean;
   message: string;
+  filename?: string;
+  canDismiss?: boolean;
+}
+
+function formatResult(result: ImportStatementResult): string {
+  if (!result.success) {
+    return `${result.filename}: ${result.error || 'Failed'}`;
+  }
+
+  if (result.type === 'sofi_apex') {
+    const account = result.account?.replace('_', ' ') || 'statement';
+    return `${account} — $${(result.total_value ?? 0).toLocaleString()} (${result.date || 'unknown date'})`;
+  }
+
+  if (result.type === 'chase_cc') {
+    const card = result.card_type?.replace('_', ' ') || 'credit card';
+    return `${card} — ${result.transactions_imported} transactions (${result.statement_date || 'unknown date'})`;
+  }
+
+  return result.filename;
 }
 
 export function FileDropZone({ className }: FileDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [results, setResults] = useState<UploadResult[]>([]);
-  const [uploadProgress, setUploadProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const uploadMutation = useUploadStatement();
-  const isUploading = uploadProgress !== null;
+  const importMutation = useImportStatements();
 
   const handleFiles = useCallback(
     async (files: File[]) => {
-      setResults([]);
+      // Keep successful results, clear failed ones for fresh retry
+      setResults((prev) => prev.filter((r) => r.success));
 
       // Filter to only PDF files
       const pdfFiles = files.filter((f) =>
@@ -37,10 +56,12 @@ export function FileDropZone({ className }: FileDropZoneProps) {
       );
 
       if (pdfFiles.length === 0) {
-        setResults([
+        setResults((prev) => [
+          ...prev,
           {
             success: false,
             message: 'Please upload PDF files',
+            canDismiss: true,
           },
         ]);
         return;
@@ -55,45 +76,45 @@ export function FileDropZone({ className }: FileDropZoneProps) {
           message: `Skipped ${nonPdfCount} non-PDF file${
             nonPdfCount > 1 ? 's' : ''
           }`,
+          canDismiss: true,
         });
       }
 
-      setUploadProgress({ current: 0, total: pdfFiles.length });
+      setIsUploading(true);
 
-      for (let i = 0; i < pdfFiles.length; i++) {
-        const file = pdfFiles[i];
-        setUploadProgress({ current: i + 1, total: pdfFiles.length });
+      try {
+        const response = await importMutation.mutateAsync(pdfFiles);
 
-        try {
-          const response = await uploadMutation.mutateAsync(file);
-
-          if (response.success) {
-            const account = response.account?.replace('_', ' ') || 'statement';
-            uploadResults.push({
-              success: true,
-              message: `Imported ${account} (${response.date})`,
-            });
-          } else {
-            uploadResults.push({
-              success: false,
-              message: `${file.name}: ${response.error || 'Failed to upload'}`,
-            });
-          }
-        } catch (error) {
+        for (const result of response.results) {
           uploadResults.push({
-            success: false,
-            message: `${file.name}: ${
-              error instanceof Error ? error.message : 'An error occurred'
-            }`,
+            success: result.success,
+            message: formatResult(result),
+            filename: result.filename,
+            canDismiss: !result.success,
           });
         }
+      } catch (error) {
+        uploadResults.push({
+          success: false,
+          message: error instanceof Error ? error.message : 'An error occurred',
+          canDismiss: true,
+        });
       }
 
-      setUploadProgress(null);
-      setResults(uploadResults);
+      setIsUploading(false);
+      // Append new results to preserved successes
+      setResults((prev) => [...prev, ...uploadResults]);
     },
-    [uploadMutation]
+    [importMutation]
   );
+
+  const handleDismiss = useCallback((index: number) => {
+    setResults((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleClearAll = useCallback(() => {
+    setResults([]);
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -169,10 +190,10 @@ export function FileDropZone({ className }: FileDropZoneProps) {
             <Loader2 className='h-10 w-10 text-muted-foreground animate-spin' />
             <div className='text-center'>
               <p className='text-sm font-medium'>
-                Processing {uploadProgress.current} of {uploadProgress.total}...
+                Processing statements...
               </p>
               <p className='text-xs text-muted-foreground mt-1'>
-                Parsing PDF and saving snapshot
+                Classifying and parsing PDFs
               </p>
             </div>
           </>
@@ -195,7 +216,7 @@ export function FileDropZone({ className }: FileDropZoneProps) {
                 {isDragging ? 'Drop to upload' : 'Drop statement PDFs here'}
               </p>
               <p className='text-xs text-muted-foreground mt-1'>
-                or click to browse (multiple files supported)
+                Brokerage and credit card statements (multiple files supported)
               </p>
             </div>
           </>
@@ -204,7 +225,7 @@ export function FileDropZone({ className }: FileDropZoneProps) {
 
       {results.length > 0 && (
         <div className='space-y-2'>
-          {/* Summary */}
+          {/* Summary with clear all button */}
           {results.length > 1 && (
             <Alert variant={failureCount === 0 ? 'default' : 'destructive'}>
               {failureCount === 0 ? (
@@ -212,11 +233,19 @@ export function FileDropZone({ className }: FileDropZoneProps) {
               ) : (
                 <XCircle className='h-4 w-4' />
               )}
-              <AlertDescription>
+              <AlertDescription className='flex-1'>
                 {successCount > 0 && `${successCount} imported`}
                 {successCount > 0 && failureCount > 0 && ', '}
                 {failureCount > 0 && `${failureCount} failed`}
               </AlertDescription>
+              <Button
+                variant='ghost'
+                size='sm'
+                className='h-6 px-2 text-xs ml-auto'
+                onClick={handleClearAll}
+              >
+                Clear all
+              </Button>
             </Alert>
           )}
           {/* Individual results */}
@@ -231,9 +260,20 @@ export function FileDropZone({ className }: FileDropZoneProps) {
               ) : (
                 <XCircle className='h-4 w-4' />
               )}
-              <AlertDescription className='text-sm'>
+              <AlertDescription className='text-sm flex-1'>
                 {result.message}
               </AlertDescription>
+              {result.canDismiss && (
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='h-5 w-5 ml-auto shrink-0 hover:bg-destructive/20'
+                  onClick={() => handleDismiss(idx)}
+                >
+                  <X className='h-3 w-3' />
+                  <span className='sr-only'>Dismiss</span>
+                </Button>
+              )}
             </Alert>
           ))}
         </div>

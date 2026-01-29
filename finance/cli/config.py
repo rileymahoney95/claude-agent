@@ -5,6 +5,21 @@ Shared configuration, paths, and constants for the finance CLI.
 import os
 from pathlib import Path
 
+# Load .env file if it exists (for ANTHROPIC_API_KEY and other env vars)
+try:
+    from dotenv import load_dotenv
+    # Load from repo root or finance directory
+    env_paths = [
+        Path(__file__).resolve().parent.parent.parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    ]
+    for env_path in env_paths:
+        if env_path.exists():
+            load_dotenv(env_path)
+            break
+except ImportError:
+    pass  # python-dotenv not installed, skip
+
 # Paths relative to repository root
 # finance/cli/config.py -> cli -> finance -> repo root
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -15,6 +30,28 @@ STATEMENTS_DIR = REPO_ROOT / "personal" / "finance" / "statements"
 LOCK_FILE = DATA_DIR / ".lock"
 PROFILE_PATH = REPO_ROOT / ".config" / "finance-profile.json"
 HOLDINGS_PATH = REPO_ROOT / ".config" / "holdings.json"
+AI_MODELS_PATH = REPO_ROOT / ".config" / "ai-models.json"
+
+# Default AI models if config is missing
+DEFAULT_AI_MODELS = {
+    "finance": {
+        "insights": "claude-sonnet-4-5-20250929",
+        "categorizer": "claude-haiku-4-5-20251001"
+    }
+}
+
+
+def get_ai_model(category: str, use_case: str) -> str:
+    """Get AI model ID from central config or return default."""
+    import json
+    if AI_MODELS_PATH.exists():
+        try:
+            with open(AI_MODELS_PATH, "r") as f:
+                config = json.load(f)
+                return config.get(category, {}).get(use_case, DEFAULT_AI_MODELS[category][use_case])
+        except Exception:
+            pass
+    return DEFAULT_AI_MODELS.get(category, {}).get(use_case, "claude-haiku-4-5-20251001")
 
 # Database configuration
 # SQLite database file (always available, no Docker needed)
@@ -144,7 +181,7 @@ PRIORITY_THRESHOLDS = {
 }
 
 # Recommendation types and priorities
-RECOMMENDATION_TYPES = ["rebalance", "surplus", "opportunity", "warning"]
+RECOMMENDATION_TYPES = ["rebalance", "surplus", "opportunity", "warning", "spending"]
 RECOMMENDATION_PRIORITIES = ["high", "medium", "low"]
 
 # Tax-advantaged annual limits (2026)
@@ -176,6 +213,30 @@ DEFAULT_EXPECTED_RETURNS = {
 }
 
 # Default projection settings for Coast FIRE and forecasting
+# ============================================================================
+# EXPENSE CATEGORIES & RECURRING DETECTION
+# ============================================================================
+
+EXPENSE_CATEGORIES = [
+    "Dining",
+    "Groceries",
+    "Transportation",
+    "Entertainment",
+    "Subscriptions",
+    "Shopping",
+    "Gas",
+    "Travel",
+    "Health & Fitness",
+    "Utilities",
+    "Home & Garden",
+    "Personal Care",
+    "Other",
+]
+
+# Recurring charge detection thresholds
+RECURRING_MIN_MONTHS = 2          # Minimum months a merchant must appear
+RECURRING_AMOUNT_VARIANCE = 0.20  # Max 20% variance in amount to be recurring
+
 DEFAULT_PROJECTION_SETTINGS = {
     "expected_returns": DEFAULT_EXPECTED_RETURNS,
     "inflation_rate": 3.0,        # Annual inflation %

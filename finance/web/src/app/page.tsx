@@ -15,6 +15,7 @@ import { AllocationChart } from '@/components/dashboard/allocation-chart';
 import { GoalCard } from '@/components/dashboard/goal-card';
 import { RecommendationCard } from '@/components/dashboard/recommendation-card';
 import { DataFreshness } from '@/components/dashboard/data-freshness';
+import { NetWorthChart } from '@/components/dashboard/net-worth-chart';
 
 export default function DashboardPage() {
   const {
@@ -89,6 +90,9 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Net Worth Over Time */}
+      <NetWorthChart />
 
       {/* Main Grid: Chart + Goals */}
       <div className='grid gap-6 lg:grid-cols-2'>

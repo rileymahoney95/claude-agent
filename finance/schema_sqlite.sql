@@ -108,3 +108,66 @@ CREATE TABLE IF NOT EXISTS projection_scenarios (
 );
 
 CREATE INDEX IF NOT EXISTS idx_projection_scenarios_primary ON projection_scenarios(is_primary);
+
+-- Credit card statements (one row per imported statement)
+CREATE TABLE IF NOT EXISTS cc_statements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    statement_date TEXT NOT NULL,
+    card_type TEXT NOT NULL,
+    account_last_four TEXT,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    previous_balance REAL,
+    payments_credits REAL,
+    purchases REAL,
+    fees REAL,
+    interest REAL,
+    new_balance REAL,
+    credit_limit REAL,
+    rewards_points_earned INTEGER,
+    rewards_points_balance INTEGER,
+    source_file TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(statement_date, card_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cc_statements_date ON cc_statements(statement_date DESC);
+
+-- Individual credit card transactions
+CREATE TABLE IF NOT EXISTS cc_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    statement_id INTEGER NOT NULL,
+    transaction_date TEXT NOT NULL,
+    description TEXT NOT NULL,
+    normalized_merchant TEXT NOT NULL,
+    amount REAL NOT NULL,
+    type TEXT NOT NULL,  -- 'purchase', 'payment', 'credit'
+    category TEXT,
+    is_recurring INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (statement_id) REFERENCES cc_statements(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_cc_transactions_date ON cc_transactions(transaction_date DESC);
+CREATE INDEX IF NOT EXISTS idx_cc_transactions_merchant ON cc_transactions(normalized_merchant);
+CREATE INDEX IF NOT EXISTS idx_cc_transactions_category ON cc_transactions(category);
+
+-- Cached merchant->category mappings (from Claude API)
+CREATE TABLE IF NOT EXISTS merchant_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    normalized_merchant TEXT NOT NULL UNIQUE,
+    category TEXT NOT NULL,
+    confidence TEXT DEFAULT 'ai',  -- 'ai' or 'manual'
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Cached spending insights from AI analysis
+CREATE TABLE IF NOT EXISTS spending_insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    month_key TEXT NOT NULL UNIQUE,
+    months_analyzed INTEGER NOT NULL,
+    insights_json TEXT NOT NULL,
+    generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    model TEXT NOT NULL
+);

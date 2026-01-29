@@ -504,6 +504,158 @@ def generate_surplus_recommendations(
 
 
 # ============================================================================
+# SPENDING-BASED RECOMMENDATIONS
+# ============================================================================
+
+def _find_most_urgent_behind_goal(goals_analysis: dict) -> Optional[dict]:
+    """Find the most urgent behind-schedule goal from analysis."""
+    most_urgent = None
+    for goal_type in ["short_term", "medium_term", "long_term"]:
+        goal = goals_analysis.get(goal_type, {})
+        if goal.get("status") != "behind":
+            continue
+        months = goal.get("months_remaining")
+        if months is None:
+            continue
+        if most_urgent is None or months < most_urgent.get("months_remaining", float("inf")):
+            most_urgent = {
+                **goal,
+                "goal_type": goal_type,
+            }
+    return most_urgent
+
+
+def _extract_monthly_delta(insight: dict) -> Optional[float]:
+    """Extract a monthly dollar amount from an insight's data dict.
+
+    Checks for common keys that represent a quantifiable monthly spend change.
+    Returns positive value representing potential monthly savings/impact, or None.
+    """
+    data = insight.get("data", {})
+    if not data:
+        return None
+
+    for key in ("monthly_amount", "change_amount", "amount"):
+        val = data.get(key)
+        if val is not None and isinstance(val, (int, float)) and val != 0:
+            return abs(float(val))
+
+    return None
+
+
+def _build_spending_recommendation(
+    insight: dict,
+    monthly_delta: Optional[float],
+    urgent_goal: Optional[dict],
+    monthly_surplus: float,
+) -> Recommendation:
+    """Build a Recommendation from a spending insight."""
+    title = insight.get("title", "Spending pattern")
+    description = insight.get("description", "")
+    severity = insight.get("severity", "info")
+
+    if monthly_delta is not None and urgent_goal is not None:
+        goal_desc = urgent_goal.get("description", "goal")
+        shortfall = (urgent_goal.get("monthly_required", 0)
+                     - urgent_goal.get("current_monthly", 0))
+
+        if monthly_surplus - monthly_delta < 0:
+            # Spending pushes surplus negative
+            priority = "high"
+            action = f"Address {title.lower()}: ${monthly_delta:,.0f}/mo spend threatens surplus"
+            impact = (f"Reducing this spend preserves surplus and protects "
+                      f"{goal_desc.lower()} timeline.")
+        elif shortfall > 0 and monthly_delta >= shortfall:
+            # Could cover full goal shortfall
+            priority = "high"
+            action = f"Redirect ${monthly_delta:,.0f}/mo from {title.lower()} toward {goal_desc.lower()}"
+            impact = (f"Covers the ${shortfall:,.0f}/mo goal shortfall, "
+                      f"putting {goal_desc.lower()} back on track.")
+        elif shortfall > 0:
+            # Partial goal acceleration
+            priority = "medium"
+            action = f"Reduce {title.lower()} (${monthly_delta:,.0f}/mo) to accelerate {goal_desc.lower()}"
+            impact = (f"Closes ${monthly_delta:,.0f} of the ${shortfall:,.0f}/mo gap "
+                      f"toward {goal_desc.lower()}.")
+        else:
+            # Surplus absorbs it, monitoring only
+            priority = "low"
+            action = f"Monitor: {title}"
+            impact = f"Current surplus absorbs this spend. {description}"
+    elif monthly_delta is not None:
+        # No goals defined — general monitoring
+        if monthly_surplus - monthly_delta < 0:
+            priority = "high"
+            action = f"Address {title.lower()}: ${monthly_delta:,.0f}/mo spend threatens surplus"
+            impact = "Reducing this spend is needed to maintain positive cash flow."
+        else:
+            priority = "low"
+            action = f"Monitor: {title}"
+            impact = f"Surplus absorbs this spend. {description}"
+    elif severity == "important":
+        # No dollar amount but important severity
+        priority = "medium"
+        action = f"Review: {title}"
+        impact = description
+    else:
+        # No dollar amount, not important — skip
+        return None
+
+    return Recommendation(
+        type="spending",
+        priority=priority,
+        action=action,
+        rationale=description,
+        impact=impact,
+        numbers={
+            "monthly_delta": round(monthly_delta, 2) if monthly_delta else None,
+            "insight_type": insight.get("type"),
+            "severity": severity,
+        },
+    )
+
+
+def generate_spending_recommendations(
+    insights: list,
+    profile: dict,
+    analysis: dict,
+) -> list:
+    """
+    Generate recommendations from cached spending insights.
+
+    Filters to moderate/important severity, quantifies monthly impact,
+    and connects spend changes to goal timelines.
+
+    Args:
+        insights: List of insight dicts from cached spending insights
+        profile: Dict from profile.load_profile()
+        analysis: Full analysis dict from get_full_analysis()
+
+    Returns:
+        List of Recommendation objects
+    """
+    recommendations = []
+
+    goals_analysis = analysis.get("goals", {})
+    urgent_goal = _find_most_urgent_behind_goal(goals_analysis)
+    monthly_surplus = analysis.get("monthly_surplus", 0)
+
+    for insight in insights:
+        severity = insight.get("severity", "info")
+        if severity not in ("moderate", "important"):
+            continue
+
+        monthly_delta = _extract_monthly_delta(insight)
+        rec = _build_spending_recommendation(
+            insight, monthly_delta, urgent_goal, monthly_surplus
+        )
+        if rec is not None:
+            recommendations.append(rec)
+
+    return recommendations
+
+
+# ============================================================================
 # HELPER FUNCTIONS FOR OUTPUT
 # ============================================================================
 
@@ -617,6 +769,24 @@ def generate_recommendations(
         surplus_recs = generate_surplus_recommendations(analysis, profile)
         all_recommendations.extend(surplus_recs)
 
+        # Spending recommendations from cached insights
+        try:
+            from database import get_cached_insights
+            from datetime import datetime as _dt
+            _month_key = _dt.now().strftime("%Y-%m") + "_3m"
+            cached = get_cached_insights(_month_key)
+            if cached and cached.get("insights"):
+                insights_list = cached["insights"]
+                if isinstance(insights_list, str):
+                    import json as _json
+                    insights_list = _json.loads(insights_list)
+                spending_recs = generate_spending_recommendations(
+                    insights_list, profile, analysis
+                )
+                all_recommendations.extend(spending_recs)
+        except Exception:
+            pass  # No expense data or database unavailable
+
         # Sort by priority
         priority_order = {"high": 0, "medium": 1, "low": 2}
         all_recommendations.sort(key=lambda r: priority_order.get(r.priority, 99))
@@ -682,6 +852,7 @@ def get_advice(focus: str = "all") -> dict:
             "rebalance": ["rebalance"],
             "surplus": ["surplus"],
             "opportunities": ["opportunity"],
+            "spending": ["spending"],
         }
         if focus in type_map:
             result["recommendations"] = [

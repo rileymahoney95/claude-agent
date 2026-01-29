@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Finance CLI and MCP server for parsing brokerage statements, managing financial holdings, and generating financial planning prompts. Designed for personal financial tracking with SoFi/Apex Clearing statements.
+Finance CLI and MCP server for parsing brokerage statements, managing financial holdings, generating financial planning prompts, and analyzing credit card expenses. Designed for personal financial tracking with SoFi/Apex Clearing and Chase credit card statements.
 
 ## Commands
 
@@ -30,7 +30,7 @@ finance-api --port 3001      # Custom port
 ### CLI Commands
 
 ```bash
-finance pull                        # Pull ALL statements from Downloads (main workflow)
+finance pull                        # Pull ALL statements from Downloads (brokerage + CC, auto-classified)
 finance pull --latest               # Only most recent statement
 finance parse <statement.pdf>       # Parse single statement
 finance history                     # List snapshots
@@ -47,7 +47,22 @@ finance plan --advisor              # Generate advisor session with recommendati
 finance advise                      # Get prioritized financial recommendations
 finance advise --focus goals        # Focus on goal-related recommendations
 finance advise --focus rebalance    # Focus on allocation/rebalancing
+finance advise --focus spending     # Focus on spending-based recommendations
 finance advise --json               # Output as JSON
+
+# Credit card expense analysis
+finance expenses                       # Show current month summary
+finance expenses import <pdf> [<pdf2>...]  # Import Chase CC statement(s)
+finance expenses import <pdf> --no-categorize  # Skip AI categorization
+finance expenses summary               # Category breakdown (current month)
+finance expenses summary --months 3    # Category breakdown (3 months)
+finance expenses history               # List imported CC statements
+finance expenses recurring             # Show recurring charges
+finance expenses categories            # View merchant->category mappings
+finance expenses set-category <merchant> <category>  # Override a category
+finance expenses insights              # AI-powered spending insights (cached)
+finance expenses insights --months 3   # Analyze last 3 months
+finance expenses insights --refresh    # Regenerate (bypass cache)
 
 # Database management (SQLite)
 finance db status                   # Check database status
@@ -70,8 +85,13 @@ finance/
 │   ├── advisor.py      # Recommendation engine with priority logic (Phase 4)
 │   ├── projections.py  # Projection settings, history, asset class mapping (Phase 5)
 │   ├── session.py      # Advisor session prompt generation (Phase 6)
+│   ├── categorizer.py  # Claude API merchant categorization with DB caching
+│   ├── insights.py     # AI-powered spending insights with caching
+│   ├── recurring.py    # Recurring charge detection across months
+│   ├── classifier.py  # Statement type detection (routes to correct parser)
 │   ├── parsers/
-│   │   └── sofi_apex.py  # PDF parsing for SoFi/Apex statements
+│   │   ├── sofi_apex.py  # PDF parsing for SoFi/Apex statements
+│   │   └── chase_cc.py   # PDF parsing for Chase credit card statements
 │   ├── snapshots.py    # Save/load snapshots (JSON or database)
 │   ├── holdings.py     # Manual holdings + CoinGecko price fetching
 │   ├── profile.py      # User profile management + interactive prompts
@@ -86,7 +106,8 @@ finance/
 │       ├── advice.py       # GET /api/v1/advice
 │       ├── statements.py   # GET/POST /api/v1/statements
 │       ├── projections.py  # Projection history, settings, scenarios (Phase 5)
-│       └── session.py      # GET /api/v1/session (advisor session prompts)
+│       ├── session.py      # GET /api/v1/session (advisor session prompts)
+│       └── expenses.py     # Credit card expense + insights endpoints
 ├── mcp/
 │   └── server.py       # FastMCP server wrapping CLI via subprocess
 ├── templates/
@@ -102,10 +123,11 @@ finance/
 
 ### Data Flow
 
-1. **Statement Parsing**: PDF → `sofi_apex.py` extracts text with pdfplumber → structured dict
-2. **Snapshots**: Parsed data saved to `.data/finance/snapshots/{date}_{account_type}.json`
-3. **Template Updates**: Asset values injected into markdown table cells via regex
-4. **Planning Prompts**: Template populated with latest snapshots + profile + holdings → clipboard
+1. **Statement Parsing**: PDF → `classifier.py` detects type → `sofi_apex.py` or `chase_cc.py` extracts text with pdfplumber → structured dict
+2. **Snapshots**: Brokerage data saved to `.data/finance/snapshots/{date}_{account_type}.json`
+3. **CC Transactions**: Credit card data saved to SQLite (`cc_statements`, `cc_transactions` tables)
+4. **Template Updates**: Asset values injected into markdown table cells via regex
+5. **Planning Prompts**: Template populated with latest snapshots + profile + holdings → clipboard
 
 ### Key Patterns
 
@@ -137,6 +159,78 @@ finance/
 - Holdings from regex matching `SYMBOL C/O QUANTITY PRICE VALUE` patterns
 - Income (dividends/interest) from formatted rows
 - Aggregates same symbol across C (Cash) and O (On-loan) account types
+
+### Chase CC Parser Details
+
+`chase_cc.py` extracts:
+
+- Card type detection (Sapphire Preferred, Reserve, Freedom, etc.)
+- Account last four digits from "Account Number" line
+- Statement period from "Opening/Closing Date" pattern
+- Account summary (previous balance, payments, purchases, fees, interest, new balance, credit limit)
+- Individual transactions with date, description, amount, and type (purchase/payment/credit)
+- Rewards points (earned this period + available balance)
+- Merchant normalization: strips POS prefixes (TST\*, SQ\*, SP, UBER\*, PAYPAL\*, AMAZON.COM\*, etc.) and trailing location/phone data
+
+**Supported card types**: `chase_sapphire_preferred`, `chase_sapphire_reserve`, `chase_freedom_unlimited`, `chase_freedom_flex`, `chase_freedom`, `chase_credit_card`
+
+### Categorizer Module
+
+`categorizer.py` provides AI-powered merchant categorization:
+
+- Uses `anthropic` SDK with `ANTHROPIC_API_KEY` env var
+- Model: `claude-haiku-4-5-20251001` (fast/cheap)
+- Batch-categorizes uncached merchants in a single API call
+- Caches results in `merchant_categories` DB table
+- Manual overrides (`confidence='manual'`) take precedence over AI
+- Graceful degradation: skips with warning if API key is not set
+
+**Setup**: Set `ANTHROPIC_API_KEY` environment variable:
+- Option 1: Create `.env` file in repo root (auto-loaded by `config.py` and `api/main.py`)
+- Option 2: Export in shell: `export ANTHROPIC_API_KEY=your-key`
+- Get API key from: https://console.anthropic.com/
+
+**Categories**: Dining, Groceries, Transportation, Entertainment, Subscriptions, Shopping, Gas, Travel, Health & Fitness, Utilities, Home & Garden, Personal Care, Other
+
+### Insights Module
+
+`insights.py` provides AI-powered spending insights:
+
+- Uses `anthropic` SDK with `ANTHROPIC_API_KEY` env var
+- Model: `claude-haiku-4-5-20251001` (same as categorizer)
+- Analyzes category breakdown, month-over-month trends, recurring charges, top merchants, and large transactions
+- Returns typed insights: `trend`, `anomaly`, `saving_opportunity`, `pattern`, `warning`
+- Each insight has severity: `info`, `moderate`, `important`
+- Results cached in `spending_insights` DB table (keyed by `{YYYY-MM}_{N}m`)
+- Cache invalidated automatically when new CC statements are imported
+- Graceful degradation: returns error dict if API key not set or API call fails
+
+**Entry Point** (`get_spending_insights`):
+
+```python
+from insights import get_spending_insights
+
+result = get_spending_insights(months=3, refresh=False)
+# Returns: {
+#   success: True,
+#   insights: [
+#     {type: "trend", severity: "moderate", title: "...", description: "...", data: {...}},
+#     ...
+#   ],
+#   generated_at: "2026-01-28T...",
+#   months_analyzed: 3,
+#   cached: True/False
+# }
+```
+
+### Recurring Detection Module
+
+`recurring.py` detects recurring charges:
+
+- Groups transactions by `normalized_merchant` across months
+- Requires merchant to appear in 2+ distinct months (`RECURRING_MIN_MONTHS`)
+- Amount variance must be < 20% (`RECURRING_AMOUNT_VARIANCE`)
+- Marks matching transactions with `is_recurring` flag in DB
 
 ### Template Population
 
@@ -200,12 +294,13 @@ result = get_full_analysis(get_unified_portfolio(), load_profile())
 - `rebalance` - Allocation drift corrections
 - `opportunity` - Market dips for DCA
 - `warning` - Issues requiring attention
+- `spending` - Spending patterns impacting goals (from cached insights)
 
 **Priority Logic**:
 
-- **High**: Goal deadline < 12 months and off-track, allocation drift > 10%
-- **Medium**: Goal behind but deadline > 12 months, drift 5-10%, market opportunity
-- **Low**: Informational, no immediate action required
+- **High**: Goal deadline < 12 months and off-track, allocation drift > 10%, spending threatens surplus or covers full goal shortfall
+- **Medium**: Goal behind but deadline > 12 months, drift 5-10%, market opportunity, partial goal acceleration from spending reduction
+- **Low**: Informational, no immediate action required, surplus absorbs spending
 
 **Key Functions**:
 
@@ -213,13 +308,14 @@ result = get_full_analysis(get_unified_portfolio(), load_profile())
 - `generate_allocation_recommendations()` - Detects drift and suggests rebalancing
 - `generate_opportunity_recommendations()` - Converts market dips to DCA suggestions
 - `generate_surplus_recommendations()` - Prioritizes surplus: urgent goals → tax-advantaged → drift correction → default split
+- `generate_spending_recommendations()` - Converts cached spending insights into goal-connected recommendations
 
 **Entry Point** (`get_advice`):
 
 ```python
 from advisor import get_advice
 
-result = get_advice(focus="all")  # or "goals", "rebalance", "surplus"
+result = get_advice(focus="all")  # or "goals", "rebalance", "surplus", "spending"
 # Returns: { success, recommendations, summary, portfolio_summary, goal_status, data_freshness }
 ```
 
@@ -313,9 +409,10 @@ result = generate_session_prompt()
 3. **Portfolio Snapshot** - Total value, monthly surplus, allocation table
 4. **Goal Status** - Each goal with progress, deadline, required pace, status
 5. **Recommendations** - Grouped by priority (high/medium/low) with rationale
-6. **Action Checklist** - Derived from high-priority recommendations
-7. **Questions Section** - Placeholder for user input
-8. **Data Freshness** - Source dates and staleness warnings
+6. **Spending Patterns** - Notable spending insights and goal impact (omitted if no expense data)
+7. **Action Checklist** - Derived from high-priority recommendations
+8. **Questions Section** - Placeholder for user input
+9. **Data Freshness** - Source dates and staleness warnings
 
 **CLI Usage**:
 
@@ -338,15 +435,17 @@ FastAPI REST server wrapping CLI modules for the web UI. All endpoints return JS
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/portfolio` | Unified portfolio view (`?no_prices=true` to skip crypto) |
+| GET | `/portfolio/history` | Portfolio value over time by account (`?months=12`) |
 | GET | `/holdings` | All holdings with live crypto prices |
 | PUT | `/holdings/{category}/{key}` | Update single holding (body: `{value, notes}`) |
 | GET | `/holdings/freshness` | Check if holdings data is stale |
 | GET | `/profile` | Full financial profile |
 | PUT | `/profile` | Replace entire profile |
 | PATCH | `/profile/{section}` | Update profile section |
-| GET | `/advice` | Financial recommendations (`?focus=goals\|rebalance\|surplus`) |
+| GET | `/advice` | Financial recommendations (`?focus=goals\|rebalance\|surplus\|spending`) |
 | GET | `/statements/history` | Snapshot history (`?account=roth_ira`) |
 | POST | `/statements/pull` | Pull statements from Downloads (`?latest=true`) |
+| POST | `/statements/import` | Upload multiple PDFs with auto-classification (`?no_categorize=true`) |
 | GET | `/projection/history` | Historical portfolio by asset class (`?months=12`) |
 | GET | `/projection/settings` | Get projection settings (merged with defaults) |
 | PATCH | `/projection/settings` | Update projection settings |
@@ -355,6 +454,16 @@ FastAPI REST server wrapping CLI modules for the web UI. All endpoints return JS
 | PATCH | `/projection/scenarios/{id}` | Update scenario |
 | DELETE | `/projection/scenarios/{id}` | Delete scenario (cannot delete primary) |
 | GET | `/session` | Generate advisor session prompt (`?format=json\|markdown`) |
+| GET | `/expenses` | List CC transactions (`?start_date&end_date&category&merchant`) |
+| GET | `/expenses/summary` | Category breakdown (`?months=1`) |
+| GET | `/expenses/recurring` | Detected recurring charges |
+| GET | `/expenses/month-over-month` | Monthly spending comparison (`?months=6`) |
+| GET | `/expenses/statements` | List imported CC statements |
+| POST | `/expenses/import` | Upload + process CC statement PDF |
+| GET | `/expenses/categories` | Merchant→category mappings |
+| GET | `/expenses/insights` | AI spending insights (`?months=3`) |
+| POST | `/expenses/insights/refresh` | Regenerate insights (`?months=3`) |
+| PUT | `/expenses/categories/{merchant}` | Override merchant category |
 
 **OpenAPI docs:** `http://localhost:8000/docs`
 
@@ -384,6 +493,10 @@ finance db status             # Check database status and table counts
 - `market_cache` - Cached CoinGecko/yfinance data (15-min TTL)
 - `audit_log` - Change tracking for data integrity
 - `projection_scenarios` - Saved projection scenarios for what-if analysis
+- `cc_statements` - Imported credit card statements (unique on `statement_date, card_type`)
+- `cc_transactions` - Individual CC transactions (cascades on statement delete)
+- `merchant_categories` - Cached merchant→category mappings (AI or manual)
+- `spending_insights` - Cached AI spending insights (keyed by month + analysis window)
 
 ### Key Queries
 
@@ -440,4 +553,4 @@ npm run build      # Production build
 npm run test:run   # Run vitest once
 ```
 
-Key features: Dashboard, holdings management, profile editor, financial advisor with session export, portfolio projections with interactive controls and scenario management.
+Key features: Dashboard with net worth history chart, holdings management, profile editor, financial advisor with session export, portfolio projections with interactive controls and scenario management, credit card expense analysis with category charts, recurring charge detection, and statement import.

@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type FilterOption = "all" | "goals" | "rebalance" | "opportunities";
+export type FilterOption = "all" | "goals" | "rebalance" | "opportunities" | "spending";
 
 interface PriorityFilterProps {
   selected: FilterOption;
@@ -16,6 +16,7 @@ const FILTER_OPTIONS: { value: FilterOption; label: string }[] = [
   { value: "goals", label: "Goals" },
   { value: "rebalance", label: "Rebalance" },
   { value: "opportunities", label: "Opportunities" },
+  { value: "spending", label: "Spending" },
 ];
 
 export function PriorityFilter({

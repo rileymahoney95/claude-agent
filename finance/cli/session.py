@@ -70,12 +70,13 @@ def generate_session_prompt(
             _format_portfolio_snapshot(portfolio, advice),
             _format_goal_status(advice),
             _format_recommendations(advice),
+            _format_spending_patterns(advice),
             _format_action_checklist(advice),
             _format_questions_section(),
             _format_data_freshness(portfolio, advice),
         ]
 
-        prompt = "\n\n".join(sections)
+        prompt = "\n\n".join(s for s in sections if s is not None)
 
         return {
             "success": True,
@@ -315,6 +316,7 @@ def _format_single_recommendation(rec: dict, num: int) -> list:
         "surplus": "[Surplus]",
         "opportunity": "[Opportunity]",
         "warning": "[Warning]",
+        "spending": "[Spending]",
     }.get(rec_type, "[-]")
 
     lines.append(f"{num}. **{type_label}** {action}")
@@ -325,6 +327,65 @@ def _format_single_recommendation(rec: dict, num: int) -> list:
     lines.append("")
 
     return lines
+
+
+def _format_spending_patterns(advice: dict) -> Optional[str]:
+    """Format spending patterns section for advisor prompt.
+
+    Returns None if no spending data exists, causing the section to be omitted.
+    """
+    recommendations = advice.get("recommendations", [])
+    spending_recs = [r for r in recommendations if r.get("type") == "spending"]
+
+    # Try to load cached insights for notable items
+    notable_insights = []
+    try:
+        from database import get_cached_insights
+        month_key = datetime.now().strftime("%Y-%m") + "_3m"
+        cached = get_cached_insights(month_key)
+        if cached and cached.get("insights"):
+            insights = cached["insights"]
+            if isinstance(insights, str):
+                import json
+                insights = json.loads(insights)
+            # Pick moderate/important insights for notable section
+            for ins in insights:
+                if ins.get("severity") in ("moderate", "important"):
+                    notable_insights.append(ins)
+    except Exception:
+        pass
+
+    if not spending_recs and not notable_insights:
+        return None
+
+    lines = [
+        "---",
+        "",
+        "## Spending Patterns",
+        "",
+    ]
+
+    if notable_insights:
+        lines.append("**Notable this month:**")
+        lines.append("")
+        for ins in notable_insights[:5]:
+            title = ins.get("title", "")
+            desc = ins.get("description", "")
+            lines.append(f"- **{title}** -- {desc}")
+        lines.append("")
+
+    if spending_recs:
+        lines.append("**Impact on goals:**")
+        lines.append("")
+        for rec in spending_recs:
+            action = rec.get("action", "")
+            impact = rec.get("impact", "")
+            lines.append(f"- {action}")
+            if impact:
+                lines.append(f"  - *{impact}*")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def _format_action_checklist(advice: dict) -> str:

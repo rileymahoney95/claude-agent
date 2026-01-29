@@ -9,6 +9,7 @@ import {
   Lightbulb,
   FileText,
   TrendingUp,
+  CreditCard,
   DollarSign,
   type LucideIcon,
 } from "lucide-react";
@@ -45,6 +46,11 @@ export const navItems: NavItem[] = [
     label: "Projections",
     href: "/projections",
     icon: TrendingUp,
+  },
+  {
+    label: "Expenses",
+    href: "/expenses",
+    icon: CreditCard,
   },
   {
     label: "Statements",

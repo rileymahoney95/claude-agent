@@ -57,7 +57,7 @@ export function ImportPanel() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Import</CardTitle>
+        <CardTitle>Import Statements</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Drag and Drop Upload */}

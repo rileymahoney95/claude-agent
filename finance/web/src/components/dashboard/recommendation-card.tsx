@@ -2,9 +2,16 @@
 
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  ArrowUpRight,
+  RefreshCw,
+  TrendingUp,
+  AlertTriangle,
+  Wallet,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Recommendation } from "@/lib/types";
 
@@ -13,12 +20,31 @@ interface RecommendationCardProps {
   defaultExpanded?: boolean;
 }
 
-// Type badge labels
-const TYPE_BADGES: Record<Recommendation["type"], string> = {
-  surplus: "S",
-  rebalance: "R",
-  opportunity: "O",
-  warning: "W",
+// Type icons and colors
+const TYPE_STYLES: Record<
+  Recommendation["type"],
+  { icon: React.ReactNode; bg: string }
+> = {
+  surplus: {
+    icon: <ArrowUpRight className="h-3.5 w-3.5" />,
+    bg: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
+  },
+  rebalance: {
+    icon: <RefreshCw className="h-3.5 w-3.5" />,
+    bg: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
+  },
+  opportunity: {
+    icon: <TrendingUp className="h-3.5 w-3.5" />,
+    bg: "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400",
+  },
+  warning: {
+    icon: <AlertTriangle className="h-3.5 w-3.5" />,
+    bg: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400",
+  },
+  spending: {
+    icon: <Wallet className="h-3.5 w-3.5" />,
+    bg: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
+  },
 };
 
 // Priority colors
@@ -53,13 +79,15 @@ export function RecommendationCard({
         {/* Header row */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 flex-1">
-            {/* Type badge */}
-            <Badge
-              variant="outline"
-              className="h-6 w-6 shrink-0 items-center justify-center p-0 font-mono text-xs"
+            {/* Type icon */}
+            <div
+              className={cn(
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+                TYPE_STYLES[recommendation.type].bg
+              )}
             >
-              {TYPE_BADGES[recommendation.type]}
-            </Badge>
+              {TYPE_STYLES[recommendation.type].icon}
+            </div>
 
             {/* Action text */}
             <div className="flex-1">

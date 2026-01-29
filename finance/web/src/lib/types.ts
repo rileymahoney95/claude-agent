@@ -137,7 +137,7 @@ export interface Goals {
 }
 
 export interface Recommendation {
-  type: 'rebalance' | 'surplus' | 'opportunity' | 'warning';
+  type: 'rebalance' | 'surplus' | 'opportunity' | 'warning' | 'spending';
   priority: 'high' | 'medium' | 'low';
   action: string;
   rationale: string;
@@ -220,6 +220,36 @@ export interface UploadStatementResponse {
   error?: string;
 }
 
+// Batch import (unified multi-file upload)
+export type StatementType = 'sofi_apex' | 'chase_cc' | 'unknown';
+
+export interface ImportStatementResult {
+  filename: string;
+  type: StatementType | null;
+  success: boolean;
+  error?: string;
+  // SoFi/Apex fields
+  account?: string;
+  date?: string;
+  total_value?: number;
+  snapshot_path?: string;
+  // Chase CC fields
+  card_type?: string;
+  statement_date?: string;
+  transactions_imported?: number;
+  new_balance?: number;
+  total_purchases?: number;
+}
+
+export interface ImportStatementsResponse {
+  success: boolean;
+  total: number;
+  imported: number;
+  failed: number;
+  template_updated: boolean;
+  results: ImportStatementResult[];
+}
+
 // =============================================================================
 // PROJECTION API TYPES (snake_case from API)
 // =============================================================================
@@ -281,13 +311,29 @@ export interface ProjectionScenarioResponse {
   scenario: ProjectionScenarioAPI;
 }
 
+// =============================================================================
+// PORTFOLIO HISTORY TYPES
+// =============================================================================
+
+export interface PortfolioHistoryPoint {
+  statement_date: string;
+  total_value: number;
+  by_account: Record<string, number>;
+}
+
+export interface PortfolioHistoryResponse {
+  success: boolean;
+  data_points: PortfolioHistoryPoint[];
+}
+
 // Focus options for advice endpoint
 export type AdviceFocus =
   | 'all'
   | 'goals'
   | 'rebalance'
   | 'surplus'
-  | 'opportunities';
+  | 'opportunities'
+  | 'spending';
 
 // Profile section names for PATCH endpoint
 export type ProfileSection =
@@ -322,3 +368,142 @@ export interface SessionResponse {
 }
 
 export type SessionFormat = 'json' | 'markdown';
+
+// =============================================================================
+// EXPENSE / CREDIT CARD TYPES
+// =============================================================================
+
+export interface CCTransaction {
+  id: number;
+  statement_id: number;
+  transaction_date: string;
+  description: string;
+  normalized_merchant: string;
+  amount: number;
+  type: 'purchase' | 'payment' | 'credit';
+  category: string | null;
+  is_recurring: number;
+  card_type?: string;
+}
+
+export interface CCStatement {
+  id: number;
+  statement_date: string;
+  card_type: string;
+  account_last_four: string | null;
+  period_start: string;
+  period_end: string;
+  previous_balance: number | null;
+  payments_credits: number | null;
+  purchases: number | null;
+  fees: number | null;
+  interest: number | null;
+  new_balance: number | null;
+  credit_limit: number | null;
+  rewards_points_earned: number | null;
+  rewards_points_balance: number | null;
+}
+
+export interface ExpenseCategoryBreakdown {
+  category: string;
+  total: number;
+  count: number;
+}
+
+export interface ExpenseSummary {
+  success: boolean;
+  months: number;
+  total_purchases: number;
+  total_payments: number;
+  transaction_count: number;
+  date_range: {
+    start: string | null;
+    end: string | null;
+  };
+  by_category: ExpenseCategoryBreakdown[];
+}
+
+export interface RecurringCharge {
+  merchant: string;
+  category: string | null;
+  avg_amount: number;
+  min_amount: number;
+  max_amount: number;
+  months_seen: number;
+  total_occurrences: number;
+  first_seen: string;
+  last_seen: string;
+  is_active: boolean;
+}
+
+export interface MonthOverMonth {
+  month: string;
+  purchases: number;
+  payments: number;
+  transaction_count: number;
+}
+
+export interface MerchantCategory {
+  normalized_merchant: string;
+  category: string;
+  confidence: 'ai' | 'manual';
+  updated_at: string;
+}
+
+export interface ExpenseTransactionsResponse {
+  success: boolean;
+  transactions: CCTransaction[];
+  count: number;
+}
+
+export interface ExpenseRecurringResponse {
+  success: boolean;
+  recurring: RecurringCharge[];
+  count: number;
+}
+
+export interface ExpenseMonthOverMonthResponse {
+  success: boolean;
+  months: MonthOverMonth[];
+}
+
+export interface ExpenseStatementsResponse {
+  success: boolean;
+  statements: CCStatement[];
+  count: number;
+}
+
+export interface ExpenseImportResponse {
+  success: boolean;
+  statement_id?: number;
+  card_type?: string;
+  statement_date?: string;
+  transactions_imported?: number;
+  new_balance?: number;
+  total_purchases?: number;
+  error?: string;
+}
+
+export interface ExpenseCategoriesResponse {
+  success: boolean;
+  categories: MerchantCategory[];
+  count: number;
+}
+
+// Spending Insights
+export interface SpendingInsight {
+  type: 'trend' | 'anomaly' | 'saving_opportunity' | 'pattern' | 'warning';
+  severity: 'info' | 'moderate' | 'important';
+  title: string;
+  description: string;
+  data: Record<string, unknown>;
+}
+
+export interface SpendingInsightsResponse {
+  success: boolean;
+  insights: SpendingInsight[];
+  generated_at: string;
+  months_analyzed: number;
+  cached: boolean;
+  error?: string;
+}

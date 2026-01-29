@@ -8,16 +8,31 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("finance-api")
+
+# Load .env file if it exists (for ANTHROPIC_API_KEY and other env vars)
+try:
+    from dotenv import load_dotenv
+    # Load from repo root or finance directory
+    env_paths = [
+        Path(__file__).resolve().parent.parent.parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    ]
+    for env_path in env_paths:
+        if env_path.exists():
+            load_dotenv(env_path)
+            break
+except ImportError:
+    pass  # python-dotenv not installed, skip
+
 # Add CLI path to sys.path for imports
 cli_path = Path(__file__).parent.parent / "cli"
 sys.path.insert(0, str(cli_path))
 
 from config import USE_DATABASE
 from database import check_db_connection, get_table_counts
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("finance-api")
 
 
 @asynccontextmanager
@@ -61,7 +76,7 @@ app.add_middleware(
 )
 
 # Include routers
-from routes import portfolio, holdings, profile, advice, statements, projections, session
+from routes import portfolio, holdings, profile, advice, statements, projections, session, expenses
 
 app.include_router(portfolio.router, prefix="/api/v1")
 app.include_router(holdings.router, prefix="/api/v1")
@@ -70,6 +85,7 @@ app.include_router(advice.router, prefix="/api/v1")
 app.include_router(statements.router, prefix="/api/v1")
 app.include_router(projections.router, prefix="/api/v1")
 app.include_router(session.router, prefix="/api/v1")
+app.include_router(expenses.router, prefix="/api/v1")
 
 
 @app.get("/health")

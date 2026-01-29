@@ -2,6 +2,33 @@
 
 ## Quick Start
 
+### Setup
+
+1. **Install dependencies:**
+   ```bash
+   cd finance
+   python -m venv venv
+   source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+   pip install -r requirements.txt
+   ```
+
+2. **Set up Claude API key (for AI expense categorization):**
+   
+   Option A: Create a `.env` file in the repo root:
+   ```bash
+   # In /Users/rileymahoney/Documents/Projects/claude-agent/.env
+   ANTHROPIC_API_KEY=your-api-key-here
+   ```
+   
+   Option B: Set environment variable in your shell:
+   ```bash
+   export ANTHROPIC_API_KEY=your-api-key-here
+   ```
+   
+   Get your API key from: https://console.anthropic.com/
+   
+   Note: AI features (categorization, spending insights) are optional. Use `--no-categorize` to skip categorization.
+
 ```bash
 # Monthly workflow
 finance pull                    # Import statements from Downloads
@@ -9,6 +36,7 @@ finance holdings set crypto.BTC 0.5   # Update crypto quantities
 finance holdings set bank.hysa 15000  # Update bank balances
 finance portfolio               # View unified portfolio
 finance advise                  # Get recommendations
+finance expenses insights       # AI spending insights
 ```
 
 ## Commands
@@ -53,6 +81,10 @@ finance plan --no-copy          # Only save to file
 finance advise                  # Get recommendations
 finance advise --focus goals    # Focus: goals, rebalance, surplus, opportunities
 finance advise --focus all      # All recommendations (default)
+
+finance expenses insights              # AI spending insights (cached)
+finance expenses insights --months 3   # Analyze last 3 months (default)
+finance expenses insights --refresh    # Regenerate insights
 ```
 
 ### Database (SQLite)
@@ -82,6 +114,7 @@ finance portfolio               # Now reads from JSON files only
 | `.config/finance-profile.json` | Your financial profile                |
 | `.config/holdings.json`        | Manual holdings (crypto, bank, other) |
 | `personal/finance/statements/` | Archived statement PDFs               |
+| `.env`                         | Environment variables (gitignored)    |
 
 ## Options
 

@@ -99,13 +99,30 @@ fromProjectionSettings(ts)   // camel → snake
 ### Component Organization
 
 **Pages** (`app/*/page.tsx`):
-- Dashboard, Holdings, Profile, Advisor, Projections, Statements
+- Dashboard, Holdings, Profile, Advisor, Projections, Expenses, Statements
+
+**Dashboard Components** (`components/dashboard/`):
+- `PortfolioSummary` - Total portfolio value header
+- `NetWorthChart` - Recharts stacked area chart showing portfolio value over time by account type
+- `AllocationChart` - Recharts donut chart by portfolio category
+- `GoalCard` - Individual goal progress with bar
+- `RecommendationCard` - Expandable recommendation item
+- `DataFreshness` - Data source timestamps
 
 **Projection Components** (`components/projections/`):
 - `ProjectionChart` - Recharts stacked area with comparison overlay
 - `CoastFireCard` - Progress toward Coast FIRE target
 - `TimeHorizonSlider`, `ReturnSliders`, `AllocationSliders` - Interactive controls
 - `ScenarioSelector`, `SaveScenarioDialog` - Scenario management
+
+**Expense Components** (`components/expenses/`):
+- `ExpenseSummaryCards` - Total spend, transaction count, avg/day, recurring total
+- `CategoryPieChart` - Recharts donut chart by spending category
+- `MonthComparisonChart` - Recharts bar chart for month-over-month comparison
+- `RecurringChargesCard` - Table of recurring subscriptions/charges
+- `TransactionTable` - Filterable/sortable transaction list with search and category filter
+- `ImportStatementDialog` - Link button redirecting to unified import on Statements page
+- `InsightCards` - AI-powered spending insights with refresh and cached indicator
 
 **UI Primitives** (`components/ui/`):
 - Shadcn components built on Radix UI
@@ -123,12 +140,13 @@ Base URL configurable via `NEXT_PUBLIC_API_URL` env var.
 
 | Domain | Endpoints |
 |--------|-----------|
-| Portfolio | GET `/portfolio` |
+| Portfolio | GET `/portfolio`, GET `/portfolio/history` |
 | Holdings | GET/PUT/DELETE `/holdings/{category}/{key}` |
 | Profile | GET/PUT `/profile`, PATCH `/profile/{section}` |
-| Advice | GET `/advice?focus=all\|goals\|rebalance\|surplus` |
-| Statements | GET `/statements/history`, POST `/statements/pull` |
+| Advice | GET `/advice?focus=all\|goals\|rebalance\|surplus\|spending` |
+| Statements | GET `/statements/history`, POST `/statements/pull`, POST `/statements/import` |
 | Projections | GET/PATCH `/projection/settings`, CRUD `/projection/scenarios` |
+| Expenses | GET `/expenses`, `/expenses/summary`, `/expenses/recurring`, `/expenses/month-over-month`, `/expenses/statements`, `/expenses/insights`, POST `/expenses/import`, `/expenses/insights/refresh`, PUT `/expenses/categories/{merchant}` |
 
 ### Testing
 

@@ -70,7 +70,7 @@ def check_db_connection() -> dict:
 
 def get_table_counts() -> dict:
     """Get row counts for all tables."""
-    tables = ["snapshots", "holdings", "profile", "goals", "goal_progress", "market_cache", "projection_scenarios"]
+    tables = ["snapshots", "holdings", "profile", "goals", "goal_progress", "market_cache", "projection_scenarios", "cc_statements", "cc_transactions", "merchant_categories", "spending_insights"]
     with get_connection() as conn:
         cur = conn.cursor()
         counts = {}
@@ -809,6 +809,312 @@ def delete_projection_scenario(scenario_id: int) -> tuple[bool, str | None]:
 
         cur.execute("DELETE FROM projection_scenarios WHERE id = ?", (scenario_id,))
         return True, None
+
+
+# =============================================================================
+# CREDIT CARD STATEMENT & TRANSACTION QUERIES
+# =============================================================================
+
+def save_cc_statement(data: dict, source_file: str = None) -> int:
+    """Save a credit card statement to database. Returns statement ID.
+
+    Uses INSERT OR REPLACE on (statement_date, card_type) unique constraint.
+    CASCADE delete on cc_transactions ensures old transactions are removed on re-import.
+    """
+    summary = data.get("summary", {})
+    period = data.get("period", {})
+    rewards = data.get("rewards", {})
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        # Enable foreign keys for cascade delete
+        cur.execute("PRAGMA foreign_keys = ON")
+
+        cur.execute("""
+            INSERT OR REPLACE INTO cc_statements (
+                statement_date, card_type, account_last_four,
+                period_start, period_end,
+                previous_balance, payments_credits, purchases, fees, interest,
+                new_balance, credit_limit,
+                rewards_points_earned, rewards_points_balance,
+                source_file
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data.get("statement_date"),
+            data.get("card_type"),
+            data.get("account_last_four"),
+            period.get("start"),
+            period.get("end"),
+            summary.get("previous_balance"),
+            summary.get("payments_credits"),
+            summary.get("purchases"),
+            summary.get("fees"),
+            summary.get("interest"),
+            summary.get("new_balance"),
+            summary.get("credit_limit"),
+            rewards.get("points_earned"),
+            rewards.get("points_balance"),
+            source_file,
+        ))
+        return cur.lastrowid
+
+
+def save_cc_transactions(statement_id: int, transactions: list) -> int:
+    """Save transactions for a credit card statement. Returns count saved."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        count = 0
+        for txn in transactions:
+            cur.execute("""
+                INSERT INTO cc_transactions (
+                    statement_id, transaction_date, description,
+                    normalized_merchant, amount, type, category, is_recurring
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                statement_id,
+                txn.get("date"),
+                txn.get("description"),
+                txn.get("normalized_merchant"),
+                txn.get("amount"),
+                txn.get("type"),
+                txn.get("category"),
+                1 if txn.get("is_recurring") else 0,
+            ))
+            count += 1
+        return count
+
+
+def get_cc_statements(limit: int = None) -> list:
+    """Get all imported CC statements, newest first."""
+    query = "SELECT * FROM cc_statements ORDER BY statement_date DESC"
+    params = []
+    if limit:
+        query += " LIMIT ?"
+        params.append(limit)
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(query, params)
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_cc_statement_by_id(statement_id: int) -> dict | None:
+    """Get a single CC statement by ID."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM cc_statements WHERE id = ?", (statement_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_cc_transactions(
+    start_date: str = None,
+    end_date: str = None,
+    category: str = None,
+    merchant: str = None,
+    txn_type: str = None,
+    limit: int = None,
+) -> list:
+    """Query CC transactions with optional filters."""
+    query = "SELECT t.*, s.card_type FROM cc_transactions t JOIN cc_statements s ON t.statement_id = s.id WHERE 1=1"
+    params = []
+
+    if start_date:
+        query += " AND t.transaction_date >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND t.transaction_date <= ?"
+        params.append(end_date)
+    if category:
+        query += " AND t.category = ?"
+        params.append(category)
+    if merchant:
+        query += " AND t.normalized_merchant LIKE ?"
+        params.append(f"%{merchant}%")
+    if txn_type:
+        query += " AND t.type = ?"
+        params.append(txn_type)
+
+    query += " ORDER BY t.transaction_date DESC"
+
+    if limit:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(query, params)
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_expense_summary(months: int = 1) -> dict:
+    """Get expense summary with category breakdown for the last N months."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        # Total spending by category for purchases only
+        cur.execute("""
+            SELECT
+                COALESCE(category, 'Uncategorized') as category,
+                SUM(amount) as total,
+                COUNT(*) as count
+            FROM cc_transactions
+            WHERE type = 'purchase'
+              AND transaction_date >= DATE('now', '-' || ? || ' months')
+            GROUP BY COALESCE(category, 'Uncategorized')
+            ORDER BY total DESC
+        """, (months,))
+        categories = [dict(row) for row in cur.fetchall()]
+
+        # Overall totals
+        cur.execute("""
+            SELECT
+                SUM(CASE WHEN type = 'purchase' THEN amount ELSE 0 END) as total_purchases,
+                SUM(CASE WHEN type = 'payment' THEN amount ELSE 0 END) as total_payments,
+                COUNT(CASE WHEN type = 'purchase' THEN 1 END) as transaction_count,
+                MIN(transaction_date) as earliest_date,
+                MAX(transaction_date) as latest_date
+            FROM cc_transactions
+            WHERE transaction_date >= DATE('now', '-' || ? || ' months')
+        """, (months,))
+        totals = dict(cur.fetchone())
+
+        return {
+            "months": months,
+            "total_purchases": totals.get("total_purchases") or 0,
+            "total_payments": totals.get("total_payments") or 0,
+            "transaction_count": totals.get("transaction_count") or 0,
+            "date_range": {
+                "start": totals.get("earliest_date"),
+                "end": totals.get("latest_date"),
+            },
+            "by_category": categories,
+        }
+
+
+def get_month_over_month(months: int = 6) -> list:
+    """Get monthly spending totals for comparison."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT
+                STRFTIME('%Y-%m', transaction_date) as month,
+                SUM(CASE WHEN type = 'purchase' THEN amount ELSE 0 END) as purchases,
+                SUM(CASE WHEN type = 'payment' THEN amount ELSE 0 END) as payments,
+                COUNT(CASE WHEN type = 'purchase' THEN 1 END) as transaction_count
+            FROM cc_transactions
+            WHERE transaction_date >= DATE('now', '-' || ? || ' months')
+            GROUP BY STRFTIME('%Y-%m', transaction_date)
+            ORDER BY month
+        """, (months,))
+        return [dict(row) for row in cur.fetchall()]
+
+
+def get_cached_merchant_category(normalized_merchant: str) -> dict | None:
+    """Look up a cached merchant->category mapping."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT normalized_merchant, category, confidence
+            FROM merchant_categories
+            WHERE normalized_merchant = ?
+        """, (normalized_merchant,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def cache_merchant_category(
+    normalized_merchant: str, category: str, confidence: str = "ai"
+) -> None:
+    """Cache a merchant->category mapping."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO merchant_categories (normalized_merchant, category, confidence, updated_at)
+            VALUES (?, ?, ?, datetime('now'))
+            ON CONFLICT(normalized_merchant) DO UPDATE SET
+                category = CASE
+                    WHEN merchant_categories.confidence = 'manual' AND excluded.confidence = 'ai'
+                    THEN merchant_categories.category
+                    ELSE excluded.category
+                END,
+                confidence = CASE
+                    WHEN merchant_categories.confidence = 'manual' AND excluded.confidence = 'ai'
+                    THEN 'manual'
+                    ELSE excluded.confidence
+                END,
+                updated_at = datetime('now')
+        """, (normalized_merchant, category, confidence))
+
+
+def get_all_merchant_categories() -> list:
+    """Get all merchant->category mappings."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT normalized_merchant, category, confidence, updated_at
+            FROM merchant_categories
+            ORDER BY normalized_merchant
+        """)
+        return [dict(row) for row in cur.fetchall()]
+
+
+def update_transaction_categories(merchant: str, category: str) -> int:
+    """Update category for all transactions matching a normalized merchant.
+    Returns count of updated rows."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE cc_transactions SET category = ?
+            WHERE normalized_merchant = ?
+        """, (category, merchant))
+        return cur.rowcount
+
+
+# =============================================================================
+# SPENDING INSIGHTS CACHE
+# =============================================================================
+
+def get_cached_insights(month_key: str) -> dict | None:
+    """Get cached spending insights by month_key."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT month_key, months_analyzed, insights_json, generated_at, model
+            FROM spending_insights
+            WHERE month_key = ?
+        """, (month_key,))
+        row = cur.fetchone()
+        if row:
+            insights = row["insights_json"]
+            if isinstance(insights, str):
+                insights = json.loads(insights)
+            return {
+                "month_key": row["month_key"],
+                "months_analyzed": row["months_analyzed"],
+                "insights": insights,
+                "generated_at": row["generated_at"],
+                "model": row["model"],
+            }
+        return None
+
+
+def save_insights(month_key: str, months: int, insights: list, model: str) -> None:
+    """Save spending insights to cache."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO spending_insights
+                (month_key, months_analyzed, insights_json, generated_at, model)
+            VALUES (?, ?, ?, datetime('now'), ?)
+        """, (month_key, months, json.dumps(insights), model))
+
+
+def invalidate_insights_cache() -> int:
+    """Delete all cached spending insights. Returns count of deleted rows."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM spending_insights")
+        return cur.rowcount
 
 
 def _format_scenario(row: dict) -> dict:

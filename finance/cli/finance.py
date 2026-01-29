@@ -38,6 +38,7 @@ from commands import (
     cmd_portfolio,
     cmd_advise,
     cmd_db,
+    cmd_expenses,
 )
 
 
@@ -116,9 +117,54 @@ def main():
 
     # advise command
     advise_parser = subparsers.add_parser("advise", help="Get financial recommendations")
-    advise_parser.add_argument("--focus", choices=["all", "goals", "rebalance", "surplus", "opportunities"],
+    advise_parser.add_argument("--focus", choices=["all", "goals", "rebalance", "surplus", "opportunities", "spending"],
                                default="all", help="Focus area for recommendations")
     advise_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # expenses command
+    expenses_parser = subparsers.add_parser("expenses", help="Credit card expense analysis")
+    expenses_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    expenses_subparsers = expenses_parser.add_subparsers(dest="expenses_command")
+
+    # expenses import
+    exp_import_parser = expenses_subparsers.add_parser("import", help="Import credit card statement(s)")
+    exp_import_parser.add_argument("statements", nargs="+", help="Path(s) to CC statement PDF(s)")
+    exp_import_parser.add_argument("--no-categorize", action="store_true",
+                                   help="Skip AI categorization")
+    exp_import_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # expenses summary
+    exp_summary_parser = expenses_subparsers.add_parser("summary", help="Category breakdown")
+    exp_summary_parser.add_argument("--months", type=int, default=1,
+                                    help="Number of months to include (default: 1)")
+    exp_summary_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # expenses history
+    exp_history_parser = expenses_subparsers.add_parser("history", help="List imported CC statements")
+    exp_history_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # expenses recurring
+    exp_recurring_parser = expenses_subparsers.add_parser("recurring", help="Show recurring charges")
+    exp_recurring_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # expenses categories
+    exp_categories_parser = expenses_subparsers.add_parser("categories", help="View merchant category mappings")
+    exp_categories_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # expenses set-category
+    exp_setcat_parser = expenses_subparsers.add_parser("set-category", help="Override a merchant category")
+    exp_setcat_parser.add_argument("merchant", help="Normalized merchant name")
+    exp_setcat_parser.add_argument("category", help="Category to assign")
+    exp_setcat_parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # expenses insights
+    exp_insights_parser = expenses_subparsers.add_parser("insights", help="AI-powered spending insights")
+    exp_insights_parser.add_argument("--months", type=int, default=3,
+                                     help="Number of months to analyze (default: 3)")
+    exp_insights_parser.add_argument("--refresh", action="store_true",
+                                     help="Regenerate insights (bypass cache)")
+    exp_insights_parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     # db command
     db_parser = subparsers.add_parser("db", help="Database management (SQLite)")
@@ -164,6 +210,8 @@ def main():
         return cmd_portfolio(args)
     elif args.command == "advise":
         return cmd_advise(args)
+    elif args.command == "expenses":
+        return cmd_expenses(args)
     elif args.command == "db":
         return cmd_db(args)
     else:
